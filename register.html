@@ -50,21 +50,7 @@
       <p class="desc">Fill this out once — you'll get a personal QR code to show at check-in.</p>
 
       <form id="regForm" novalidate>
-        <div class="mb-3">
-          <label class="form-label">Full Name</label>
-          <input type="text" class="form-control" id="fullName" required>
-          <div class="invalid-feedback">Enter your full name.</div>
-        </div>
-        <div class="mb-3">
-          <label class="form-label">Section</label>
-          <input type="text" class="form-control" id="section" placeholder="e.g. BSN 2-A" required>
-          <div class="invalid-feedback">Enter your section.</div>
-        </div>
-        <div class="mb-4">
-          <label class="form-label">Student ID</label>
-          <input type="text" class="form-control" id="studentId" required>
-          <div class="invalid-feedback">Enter your student ID.</div>
-        </div>
+        <div id="dynamicFields"></div>
         <button type="submit" class="btn btn-primary w-100" id="submitBtn">Get My QR Code</button>
       </form>
     </div>

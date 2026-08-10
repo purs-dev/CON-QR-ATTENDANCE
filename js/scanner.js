@@ -16,6 +16,21 @@ function showToast(message, type = '') {
   el.addEventListener('hidden.bs.toast', () => el.remove());
 }
 
+// ---------- ripple effect on buttons ----------
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.btn');
+  if (!btn) return;
+  const rect = btn.getBoundingClientRect();
+  const ripple = document.createElement('span');
+  const size = Math.max(rect.width, rect.height);
+  ripple.className = 'ripple';
+  ripple.style.width = ripple.style.height = size + 'px';
+  ripple.style.left = (e.clientX - rect.left - size / 2) + 'px';
+  ripple.style.top = (e.clientY - rect.top - size / 2) + 'px';
+  btn.appendChild(ripple);
+  setTimeout(() => ripple.remove(), 600);
+});
+
 // ---------- flash panel (primary feedback while scanning) ----------
 let flashTimer;
 function flash(message, type) {
@@ -41,6 +56,16 @@ function escapeHtml(str = '') {
   return String(str).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
 }
 
+// Registrations now have dynamic field keys (whatever the session's fields
+// were set to). "name" is the default id for the first field, but if an
+// admin renamed/removed it, fall back to the first non-metadata value.
+function getDisplayName(data) {
+  if (data.name) return data.name;
+  const metaKeys = ['registeredAt', 'checkedIn', 'checkedInAt'];
+  const key = Object.keys(data).find(k => !metaKeys.includes(k));
+  return key ? data[key] : 'Student';
+}
+
 // ---------- core check-in logic (shared by camera scan + manual entry) ----------
 async function checkIn(sessionId, registrationId) {
   try {
@@ -53,16 +78,18 @@ async function checkIn(sessionId, registrationId) {
     }
 
     const data = snap.data();
+    const name = getDisplayName(data);
+
     if (data.checkedIn) {
       const time = data.checkedInAt ? data.checkedInAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-      flash(`${data.name} already checked in ${time ? 'at ' + time : ''}`, 'warn');
+      flash(`${name} already checked in ${time ? 'at ' + time : ''}`, 'warn');
       return;
     }
 
     await updateDoc(ref, { checkedIn: true, checkedInAt: serverTimestamp() });
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    flash(`✓ ${data.name} checked in`, 'success');
-    addRecent(data.name, now);
+    flash(`✓ ${name} checked in`, 'success');
+    addRecent(name, now);
   } catch (err) {
     console.error(err);
     flash('Connection problem — could not record check-in.', 'error');

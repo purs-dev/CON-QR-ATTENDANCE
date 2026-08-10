@@ -11,13 +11,12 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/fireba
 import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBFCTkMlx95BAOLgg5M7B2W9s5UnpxhFq8",
-  authDomain: "spcf-con-attendance.firebaseapp.com",
-  projectId: "spcf-con-attendance",
-  storageBucket: "spcf-con-attendance.firebasestorage.app",
-  messagingSenderId: "700930891597",
-  appId: "1:700930891597:web:7b09c69cec89c7409f6104",
-  measurementId: "G-M0QVHY6450"
+  apiKey: "PASTE_YOUR_API_KEY",
+  authDomain: "PASTE_YOUR_PROJECT.firebaseapp.com",
+  projectId: "PASTE_YOUR_PROJECT_ID",
+  storageBucket: "PASTE_YOUR_PROJECT.appspot.com",
+  messagingSenderId: "PASTE_YOUR_SENDER_ID",
+  appId: "PASTE_YOUR_APP_ID"
 };
 
 const app = initializeApp(firebaseConfig);

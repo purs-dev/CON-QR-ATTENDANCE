@@ -12,6 +12,15 @@ const formState = document.getElementById('formState');
 const qrState = document.getElementById('qrState');
 
 let sessionName = '';
+let sessionFields = [];
+
+function defaultFields() {
+  return [
+    { id: 'name', label: 'Full Name', required: true },
+    { id: 'section', label: 'Section', required: true },
+    { id: 'studentId', label: 'Student ID', required: true }
+  ];
+}
 
 async function init() {
   if (!sessionId) return showInvalid();
@@ -22,12 +31,14 @@ async function init() {
 
     const data = snap.data();
     sessionName = data.name;
+    sessionFields = (data.fields && data.fields.length) ? data.fields : defaultFields();
 
     if (data.active === false) {
       return showInvalid('Registration Closed', 'This session is no longer accepting new registrations. If you already registered, use the QR you were given earlier.');
     }
 
     document.getElementById('sessionNameDisplay').textContent = sessionName;
+    renderFields();
     loadingState.style.display = 'none';
     formState.style.display = 'block';
   } catch (err) {
@@ -43,42 +54,55 @@ function showInvalid(title = 'Link Not Valid', message = 'This registration link
   invalidState.style.display = 'block';
 }
 
+function renderFields() {
+  const container = document.getElementById('dynamicFields');
+  container.innerHTML = sessionFields.map(f => `
+    <div class="mb-3">
+      <label class="form-label">${escapeHtml(f.label)}</label>
+      <input type="text" class="form-control" data-field-id="${escapeAttr(f.id)}" ${f.required ? 'required' : ''}>
+      <div class="invalid-feedback">${escapeHtml(f.label)} is required.</div>
+    </div>
+  `).join('');
+}
+function escapeHtml(str = '') {
+  return String(str).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+}
+function escapeAttr(str = '') { return escapeHtml(str).replace(/`/g, '&#96;'); }
+
 // ---------- form submit ----------
 document.getElementById('regForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const form = e.target;
-  const nameEl = document.getElementById('fullName');
-  const sectionEl = document.getElementById('section');
-  const idEl = document.getElementById('studentId');
+  const inputs = [...document.querySelectorAll('#dynamicFields [data-field-id]')];
 
   let valid = true;
-  [nameEl, sectionEl, idEl].forEach(el => {
-    if (!el.value.trim()) { el.classList.add('is-invalid'); valid = false; }
+  const values = {};
+  inputs.forEach(el => {
+    const val = el.value.trim();
+    values[el.dataset.fieldId] = val;
+    const required = el.hasAttribute('required');
+    if (required && !val) { el.classList.add('is-invalid'); valid = false; }
     else el.classList.remove('is-invalid');
   });
   if (!valid) return;
-
-  const name = nameEl.value.trim();
-  const section = sectionEl.value.trim();
-  const studentId = idEl.value.trim();
 
   const btn = document.getElementById('submitBtn');
   btn.disabled = true; btn.textContent = 'Submitting…';
 
   try {
     const regCollection = collection(db, 'sessions', sessionId, 'registrations');
+    let registrationId = null;
 
-    // Idempotent: if this student ID already registered for this session,
-    // reuse their existing record instead of creating a duplicate.
-    const dupQuery = query(regCollection, where('studentId', '==', studentId), limit(1));
-    const dupSnap = await getDocs(dupQuery);
+    // Idempotent: if a "studentId" field exists and this ID already registered,
+    // reuse the existing record instead of creating a duplicate.
+    if (values.studentId) {
+      const dupQuery = query(regCollection, where('studentId', '==', values.studentId), limit(1));
+      const dupSnap = await getDocs(dupQuery);
+      if (!dupSnap.empty) registrationId = dupSnap.docs[0].id;
+    }
 
-    let registrationId;
-    if (!dupSnap.empty) {
-      registrationId = dupSnap.docs[0].id;
-    } else {
+    if (!registrationId) {
       const docRef = await addDoc(regCollection, {
-        name, section, studentId,
+        ...values,
         registeredAt: serverTimestamp(),
         checkedIn: false,
         checkedInAt: null
@@ -86,7 +110,8 @@ document.getElementById('regForm').addEventListener('submit', async (e) => {
       registrationId = docRef.id;
     }
 
-    showQr(registrationId, name);
+    const displayName = values.name || values[sessionFields[0]?.id] || Object.values(values)[0] || 'Registered';
+    showQr(registrationId, displayName);
   } catch (err) {
     console.error(err);
     alert('Something went wrong submitting your registration. Please try again.');
@@ -120,5 +145,30 @@ function showQr(registrationId, name) {
     a.click();
   };
 }
+
+// ---------- badge tilt effect ----------
+document.addEventListener('mousemove', (e) => {
+  const badge = document.querySelector('.badge-box');
+  if (!badge) return;
+  const rect = badge.getBoundingClientRect();
+  const x = (e.clientX - (rect.left + rect.width / 2)) / 18;
+  const y = (e.clientY - (rect.top + rect.height / 2)) / 18;
+  badge.style.transform = `perspective(1000px) rotateY(${x}deg) rotateX(${-y}deg)`;
+});
+
+// ---------- ripple effect on buttons ----------
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.btn');
+  if (!btn) return;
+  const rect = btn.getBoundingClientRect();
+  const ripple = document.createElement('span');
+  const size = Math.max(rect.width, rect.height);
+  ripple.className = 'ripple';
+  ripple.style.width = ripple.style.height = size + 'px';
+  ripple.style.left = (e.clientX - rect.left - size / 2) + 'px';
+  ripple.style.top = (e.clientY - rect.top - size / 2) + 'px';
+  btn.appendChild(ripple);
+  setTimeout(() => ripple.remove(), 600);
+});
 
 init();

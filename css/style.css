@@ -258,4 +258,57 @@ tr.row-new td{ animation:rowFlash 2.2s ease-out; }
 
 footer.site-footer{ text-align:center; padding:26px; font-size:11px; color:var(--on-dark); opacity:.5; }
 
+/* ---------- Interaction effects ---------- */
+.btn{ transition: transform .16s var(--ease), box-shadow .16s var(--ease), background .2s, color .2s; }
+.btn:hover:not(:disabled){ transform:translateY(-2px); }
+.btn:active:not(:disabled){ transform:translateY(0) scale(.97); }
+.btn-primary:hover:not(:disabled){ box-shadow:0 6px 0 0 var(--gold); }
+.btn-gold:hover:not(:disabled){ box-shadow:0 6px 0 0 var(--forest); }
+
+.ripple{
+  position:absolute; border-radius:50%; transform:scale(0);
+  background:rgba(255,255,255,0.5); pointer-events:none;
+  animation:rippleAnim .55s ease-out forwards;
+}
+@keyframes rippleAnim{ to{ transform:scale(2.8); opacity:0; } }
+.btn{ position:relative; overflow:hidden; }
+
+a, button, .nav-link, .history-item, .form-select{ transition: color .18s, background .18s, border-color .18s, box-shadow .18s; }
+:focus-visible{ outline:2px solid var(--gold-bright); outline-offset:2px; border-radius:4px; }
+
+.history-item{ transition:background .18s var(--ease), transform .18s var(--ease); border-left:3px solid transparent; }
+.history-item:hover{ background:rgba(11,61,46,0.11); border-left-color:var(--gold); transform:translateX(3px); }
+.history-item button{ transition:transform .15s var(--ease), background .15s; }
+.history-item button:hover{ transform:translateY(-1px); background:var(--forest); color:var(--cream); }
+.history-item button.del:hover{ background:var(--danger); color:var(--cream); }
+
+.table-frame tbody tr{ transition:background .15s; cursor:default; }
+.table-frame tbody tr:hover td{ background:rgba(212,167,61,0.14); }
+
+/* badge tilt + shine (JS toggles the transform inline on mousemove) */
+.badge-box{
+  transform-style:preserve-3d; will-change:transform;
+  background-image:linear-gradient(115deg, transparent 42%, rgba(255,255,255,0.65) 50%, transparent 58%);
+  background-repeat:no-repeat; background-size:280% 280%; background-position:-70% -70%;
+  transition:transform .1s ease-out, background-position .7s ease, box-shadow .25s;
+}
+.badge-box:hover{ background-position:170% 170%; box-shadow:18px 18px 0px var(--forest); }
+
+/* load-in stagger */
+@keyframes riseIn{ from{ opacity:0; transform:translateY(16px);} to{ opacity:1; transform:none;} }
+.card, .badge-box, .table-frame, .scan-frame{ animation:riseIn .5s var(--ease) both; }
+#qrProtected .card{ animation-delay:.06s; }
+
+/* ---------- Registration fields editor ---------- */
+.field-row{
+  background:rgba(11,61,46,0.05); padding:8px 10px; border-radius:8px;
+}
+.field-row .form-control{ border-bottom:1.5px solid var(--line-soft); padding:8px 4px; font-size:13.5px; }
+.field-row .form-control:focus{ border-bottom-color:var(--gold); }
+.field-remove-btn{
+  background:none; border:none; color:var(--danger); font-size:18px; line-height:1; font-weight:800;
+  padding:0 4px; flex-shrink:0;
+}
+.field-remove-btn:hover{ transform:scale(1.2); }
+
 @media (max-width:520px){ .card{ padding:26px 20px; } }

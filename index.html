@@ -69,11 +69,19 @@
                 <input type="text" class="form-control" id="eventName" placeholder="e.g. Clinical Seminar A">
               </div>
 
+              <div class="mb-3">
+                <label class="form-label">What Students Fill Out</label>
+                <div id="fieldsEditor"></div>
+                <button type="button" class="btn-link-minimal mt-2" id="addFieldBtn">+ Add Field</button>
+              </div>
+
               <button class="btn btn-primary w-100" id="createSessionBtn">Create Session &amp; Get QR</button>
+              <button class="btn-link-minimal mt-2" id="cancelEditBtn" style="display:none;">Cancel edit</button>
+
               <div id="sessionCreatedNote" class="small mt-3" style="display:none;">
-                <span class="status-pill in">Active</span>
+                <span class="status-pill in" id="sessionStatusPill">Active</span>
                 <span class="text-body ms-2" id="activeSessionLabel"></span>
-                <button class="btn-link-minimal ms-2" id="closeSessionBtn">Close registration</button>
+                <button class="btn-link-minimal ms-2" id="toggleActiveBtn">End session</button>
               </div>
 
               <div class="history-module">
@@ -105,7 +113,7 @@
               <a class="btn btn-gold" id="openScannerBtn" href="#" target="_blank" style="pointer-events:none;opacity:.35;">Open Scanner ↗</a>
             </div>
             <p class="small text-body-secondary text-center" style="max-width:380px;">
-              Students scan this QR (or open the copied link) to register their Name, Section, and Student ID —
+              Students scan this QR (or open the copied link) to fill in the fields you've set up —
               they'll get their own personal check-in QR in return.
             </p>
           </div>
@@ -150,7 +158,7 @@
           <div class="table-frame">
             <div class="table-scroll">
               <table class="table table-hover" id="responseTable" style="display:none">
-                <thead><tr><th>Name</th><th>Section</th><th>Student ID</th><th>Status</th><th>Checked In</th></tr></thead>
+                <thead><tr id="tableHead"></tr></thead>
                 <tbody id="tableBody"></tbody>
               </table>
               <div id="emptyState" class="empty-placeholder">
