@@ -72,7 +72,7 @@ const qrProtected = document.getElementById('qrProtected');
 document.getElementById('unlockBtn').addEventListener('click', () => {
   const input = document.getElementById('passcodeInput').value;
   if (input === ADMIN_KEY) {
-    sessionStorage.setItem('authorized', 'true');
+    localStorage.setItem('authorized', 'true');
     lockCard.style.display = 'none';
     qrProtected.style.display = 'block';
     renderHistory();
@@ -83,12 +83,12 @@ document.getElementById('unlockBtn').addEventListener('click', () => {
     sfx.play('error');
   }
 });
-if (sessionStorage.getItem('authorized') === 'true') {
+if (localStorage.getItem('authorized') === 'true') {
   lockCard.style.display = 'none';
   qrProtected.style.display = 'block';
 }
 document.getElementById('relockBtn').addEventListener('click', () => {
-  sessionStorage.removeItem('authorized');
+  localStorage.removeItem('authorized');
   location.reload();
 });
 
@@ -237,7 +237,6 @@ async function enterEditMode(id) {
     const snap = await getDoc(doc(db, 'sessions', id));
     if (!snap.exists()) {
       showToast('That session no longer exists.', 'error');
-      removeFromHistory(id); renderHistory();
       return;
     }
     const data = snap.data();

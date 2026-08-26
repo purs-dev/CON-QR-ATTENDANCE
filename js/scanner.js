@@ -183,7 +183,7 @@ function onScanSuccess(decodedText) {
 }
 
 // ---------- camera scanning ----------
-const readerEl = document.getElementById('reader');
+let readerEl = document.getElementById('reader');
 let html5QrCode = null;
 let cameraStarting = false;
 let busyRetries = 0;
@@ -299,17 +299,47 @@ async function startCamera() {
     cameraStarting = false;
   }
 }
-startCamera();
 
 // ---------- manual check-in fallback ----------
-const manualSession = document.getElementById('manualSession');
-const sessionHint = document.getElementById('sessionHint');
+let manualSession = document.getElementById('manualSession');
+let sessionHint = document.getElementById('sessionHint');
+
+function rebindScannerUI() {
+  readerEl = document.getElementById('reader');
+  manualSession = document.getElementById('manualSession');
+  sessionHint = document.getElementById('sessionHint');
+
+  document.getElementById('manualBtn').addEventListener('click', async () => {
+    const sessionId = manualSession.value;
+    const studentId = document.getElementById('manualStudentId').value.trim();
+    if (!sessionId) { flash('Pick a session first.', 'error'); return; }
+    if (!studentId) { flash('Enter a student ID.', 'error'); return; }
+
+    try {
+      const regCollection = collection(db, 'sessions', sessionId, 'registrations');
+      const q = query(regCollection, where('studentId', '==', studentId), limit(1));
+      const snap = await getDocs(q);
+      if (snap.empty) {
+        flash('No registration found for that ID in this session.', 'error');
+        return;
+      }
+      await checkIn(sessionId, snap.docs[0].id);
+      document.getElementById('manualStudentId').value = '';
+    } catch (err) {
+      console.error(err);
+      flash('Connection problem — could not look up that ID.', 'error');
+    }
+  });
+}
 
 // Live-sync the manual check-in dropdown with ALL ACTIVE sessions.
 // The old version loaded once at page open — sessions created afterward
 // never appeared on other scanner devices, and any transient failure left
 // the list silently empty. Now it updates in real time and auto-retries.
 let sessionsUnsubscribe = null;
+let hasActiveSessions = false;
+let cameraStarted = false;
+
 function watchActiveSessions() {
   if (sessionsUnsubscribe) sessionsUnsubscribe();
   const q = query(collection(db, 'sessions'), orderBy('createdAt', 'desc'), limit(50));
@@ -318,43 +348,58 @@ function watchActiveSessions() {
     const active = [];
     snap.forEach(d => {
       const data = d.data();
-      if (data.active === false) return; // ended sessions are hidden
+      if (data.active === false) return;
       active.push({ id: d.id, name: data.name || 'Untitled session' });
     });
+    hasActiveSessions = active.length > 0;
+
     manualSession.innerHTML = '<option value="">— Select a session —</option>' +
       active.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}</option>`).join('');
     if (current && active.some(s => s.id === current)) manualSession.value = current;
-    if (sessionHint) sessionHint.style.display = active.length ? 'none' : 'block';
+
+    const scanFrame = document.querySelector('.scan-frame');
+
+    if (!hasActiveSessions) {
+      if (!scanFrame.querySelector('.no-session-placeholder')) {
+        scanFrame.innerHTML = `
+          <div class="camera-error no-session-placeholder" style="padding:50px 24px;">
+            <div class="ce-icon" style="font-size:48px;">📋</div>
+            <h3>No Active Sessions</h3>
+            <p>There are no active sessions yet. Ask the admin to create one from the Admin panel.</p>
+          </div>`;
+      }
+      cameraStarted = false;
+      return;
+    }
+
+    if (hasActiveSessions && !cameraStarted) {
+      cameraStarted = true;
+      scanFrame.innerHTML = `
+        <div id="reader"></div>
+        <div id="scanFlash" class="scan-result-flash" style="display:none;"></div>
+        <div class="mt-4">
+          <h3 class="session-tag mb-2" style="margin-bottom:8px;">Recent Check-ins</h3>
+          <div id="recentList"><p class="small text-body-secondary">No scans yet.</p></div>
+        </div>
+        <div class="manual-panel">
+          <p class="small text-body-secondary mb-2">Camera not cooperating? Check a student in manually.</p>
+          <div class="mb-2">
+            <label class="form-label">Session</label>
+            <select class="form-select" id="manualSession"><option value="">— Select a session —</option></select>
+            <p id="sessionHint" class="small text-body-secondary" style="display:none; margin:6px 0 0;">No active sessions yet — they appear here automatically once created or reopened in Admin.</p>
+          </div>
+          <div class="d-flex gap-2">
+            <input type="text" class="form-control" id="manualStudentId" placeholder="Student ID">
+            <button class="btn btn-primary" id="manualBtn" style="white-space:nowrap;">Check In</button>
+          </div>
+        </div>`;
+      rebindScannerUI();
+      startCamera();
+    }
   }, (err) => {
     console.error(err);
-    if (sessionHint) {
-      sessionHint.textContent = 'Could not load sessions — retrying…';
-      sessionHint.style.display = 'block';
-    }
-    showToast('Could not load sessions — check connection / Firestore rules. Retrying…', 'error');
+    showToast('Could not load sessions — check connection. Retrying…', 'error');
     setTimeout(watchActiveSessions, 4000);
   });
 }
 watchActiveSessions();
-
-document.getElementById('manualBtn').addEventListener('click', async () => {
-  const sessionId = manualSession.value;
-  const studentId = document.getElementById('manualStudentId').value.trim();
-  if (!sessionId) { flash('Pick a session first.', 'error'); return; }
-  if (!studentId) { flash('Enter a student ID.', 'error'); return; }
-
-  try {
-    const regCollection = collection(db, 'sessions', sessionId, 'registrations');
-    const q = query(regCollection, where('studentId', '==', studentId), limit(1));
-    const snap = await getDocs(q);
-    if (snap.empty) {
-      flash('No registration found for that ID in this session.', 'error');
-      return;
-    }
-    await checkIn(sessionId, snap.docs[0].id);
-    document.getElementById('manualStudentId').value = '';
-  } catch (err) {
-    console.error(err);
-    flash('Connection problem — could not look up that ID.', 'error');
-  }
-});
