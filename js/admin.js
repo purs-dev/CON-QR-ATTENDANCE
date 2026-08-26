@@ -272,15 +272,12 @@ document.getElementById('createSessionBtn').addEventListener('click', async () =
     if (wasEditing) {
       const sessionId = editingSessionId;
       await updateDoc(doc(db, 'sessions', sessionId), { name, fields });
-      updateHistoryName(sessionId, name);
       showToast(`Session "${name}" updated.`);
       sfx.play('pop');
       displaySessionQR(sessionId, name, currentSessionId === sessionId ? currentSessionActive : true);
       resetToNewSessionForm();
     } else {
       const docRef = await addDoc(collection(db, 'sessions'), { name, createdAt: serverTimestamp(), active: true, fields });
-      saveToHistory(docRef.id, name);
-      renderHistory();
       showToast(`Session "${name}" created.`);
       displaySessionQR(docRef.id, name, true);
       resetToNewSessionForm();
@@ -297,63 +294,55 @@ document.getElementById('createSessionBtn').addEventListener('click', async () =
   }
 });
 
-// ---------- local history (per-device convenience list) ----------
-function saveToHistory(id, name) {
-  const list = JSON.parse(localStorage.getItem('con_sessions') || '[]');
-  list.unshift({ id, name, createdAt: Date.now() });
-  localStorage.setItem('con_sessions', JSON.stringify(list.slice(0, 10)));
-}
-function removeFromHistory(id) {
-  const list = JSON.parse(localStorage.getItem('con_sessions') || '[]').filter(s => s.id !== id);
-  localStorage.setItem('con_sessions', JSON.stringify(list));
-}
-function updateHistoryName(id, name) {
-  const list = JSON.parse(localStorage.getItem('con_sessions') || '[]');
-  const item = list.find(s => s.id === id);
-  if (item) { item.name = name; localStorage.setItem('con_sessions', JSON.stringify(list)); }
-  renderHistory();
-}
+let historyUnsub = null;
 function renderHistory() {
-  const list = JSON.parse(localStorage.getItem('con_sessions') || '[]');
+  if (historyUnsub) historyUnsub();
   const container = document.getElementById('historyList');
-  if (!list.length) {
-    container.innerHTML = '<p class="small text-body-secondary mb-0">No sessions yet.</p>';
-    return;
-  }
-  container.innerHTML = list.map(s => `
-    <div class="history-item">
-      <span class="hname">${escapeHtml(s.name)}</span>
-      <div class="hactions">
-        <button data-action="qr" data-id="${s.id}">QR</button>
-        <button data-action="edit" data-id="${s.id}">Edit</button>
-        <button data-action="delete" data-id="${s.id}" class="del">Delete</button>
-      </div>
-    </div>
-  `).join('');
+  const q = query(collection(db, 'sessions'), orderBy('createdAt', 'desc'), limit(20));
+  historyUnsub = onSnapshot(q, (snap) => {
+    if (snap.empty) {
+      container.innerHTML = '<p class="small text-body-secondary mb-0">No sessions yet.</p>';
+      return;
+    }
+    container.innerHTML = snap.docs.map(d => {
+      const data = d.data();
+      const active = data.active !== false;
+      return `
+      <div class="history-item">
+        <span class="hname">${escapeHtml(data.name || 'Untitled session')} ${active ? '' : '<span class="status-pill out" style="font-size:9px;padding:2px 8px;">Ended</span>'}</span>
+        <div class="hactions">
+          <button data-action="qr" data-id="${d.id}">QR</button>
+          <button data-action="edit" data-id="${d.id}">Edit</button>
+          <button data-action="delete" data-id="${d.id}" class="del">Delete</button>
+        </div>
+      </div>`;
+    }).join('');
 
-  container.querySelectorAll('[data-action="qr"]').forEach(b => {
-    b.addEventListener('click', async () => {
-      try {
-        const snap = await getDoc(doc(db, 'sessions', b.dataset.id));
-        if (!snap.exists()) { showToast('That session no longer exists.', 'error'); removeFromHistory(b.dataset.id); renderHistory(); return; }
-        displaySessionQR(b.dataset.id, snap.data().name, snap.data().active !== false);
-      } catch (err) { console.error(err); showToast('Could not load that session.', 'error'); }
+    container.querySelectorAll('[data-action="qr"]').forEach(b => {
+      b.addEventListener('click', async () => {
+        try {
+          const s = await getDoc(doc(db, 'sessions', b.dataset.id));
+          if (!s.exists()) { showToast('That session no longer exists.', 'error'); return; }
+          displaySessionQR(b.dataset.id, s.data().name, s.data().active !== false);
+        } catch (err) { console.error(err); showToast('Could not load that session.', 'error'); }
+      });
     });
-  });
-  container.querySelectorAll('[data-action="edit"]').forEach(b => {
-    b.addEventListener('click', () => enterEditMode(b.dataset.id));
-  });
-  container.querySelectorAll('[data-action="delete"]').forEach(b => {
-    b.addEventListener('click', () => deleteSession(b.dataset.id));
+    container.querySelectorAll('[data-action="edit"]').forEach(b => {
+      b.addEventListener('click', () => enterEditMode(b.dataset.id));
+    });
+    container.querySelectorAll('[data-action="delete"]').forEach(b => {
+      b.addEventListener('click', () => deleteSession(b.dataset.id));
+    });
+  }, (err) => {
+    console.error(err);
+    showToast('Could not load session history — retrying…', 'error');
+    setTimeout(renderHistory, 3000);
   });
 }
 renderHistory();
 
 async function deleteSession(id) {
-  const list = JSON.parse(localStorage.getItem('con_sessions') || '[]');
-  const entry = list.find(s => s.id === id);
-  const label = entry ? entry.name : 'this session';
-  if (!confirm(`Delete "${label}" and all of its attendance records? This can't be undone.`)) return;
+  if (!confirm('Delete this session and all of its attendance records? This can\'t be undone.')) return;
 
   try {
     const regsSnap = await getDocs(collection(db, 'sessions', id, 'registrations'));
@@ -364,9 +353,6 @@ async function deleteSession(id) {
       await batch.commit();
     }
     await deleteDoc(doc(db, 'sessions', id));
-
-    removeFromHistory(id);
-    renderHistory();
 
     if (currentSessionId === id) {
       currentSessionId = null;
@@ -379,8 +365,7 @@ async function deleteSession(id) {
       scannerBtn.style.pointerEvents = 'none'; scannerBtn.style.opacity = '.35';
     }
     if (editingSessionId === id) resetToNewSessionForm();
-    loadSessionOptions();
-    showToast(`"${label}" deleted.`, 'warn');
+    showToast('Session deleted.', 'warn');
   } catch (err) {
     console.error(err);
     showToast('Could not delete — check your Firebase config/rules.', 'error');
@@ -394,19 +379,28 @@ let liveFields = defaultFields();
 let liveSessionName = '';
 let latestRegistrations = [];
 
-async function loadSessionOptions() {
-  const q = query(collection(db, 'sessions'), orderBy('createdAt', 'desc'), limit(20));
-  const snap = await getDocs(q);
-  const current = picker.value;
-  picker.innerHTML = '<option value="">— Select a session —</option>';
-  snap.forEach(d => {
-    const opt = document.createElement('option');
-    opt.value = d.id;
-    opt.textContent = d.data().name;
-    picker.appendChild(opt);
+let sessionsUnsubscribeLive = null;
+function loadSessionOptions() {
+  if (sessionsUnsubscribeLive) sessionsUnsubscribeLive();
+  const q = query(collection(db, 'sessions'), orderBy('createdAt', 'desc'), limit(50));
+  sessionsUnsubscribeLive = onSnapshot(q, (snap) => {
+    const current = picker.value;
+    picker.innerHTML = '<option value="">— Select a session —</option>';
+    snap.forEach(d => {
+      const data = d.data();
+      if (data.active === false) return;
+      const opt = document.createElement('option');
+      opt.value = d.id;
+      opt.textContent = data.name || 'Untitled session';
+      picker.appendChild(opt);
+    });
+    if (current && picker.querySelector(`option[value="${current}"]`)) picker.value = current;
+    else if (currentSessionId && picker.querySelector(`option[value="${currentSessionId}"]`)) picker.value = currentSessionId;
+  }, (err) => {
+    console.error(err);
+    showToast('Could not load sessions — retrying…', 'error');
+    setTimeout(loadSessionOptions, 3000);
   });
-  if (current) picker.value = current;
-  else if (currentSessionId) picker.value = currentSessionId;
 }
 document.querySelector('[data-bs-target="#panel-live"]').addEventListener('shown.bs.tab', loadSessionOptions);
 loadSessionOptions();
