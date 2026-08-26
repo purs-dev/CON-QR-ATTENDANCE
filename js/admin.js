@@ -3,6 +3,7 @@ import {
   collection, addDoc, doc, updateDoc, deleteDoc, getDoc, getDocs, writeBatch,
   onSnapshot, query, where, orderBy, limit, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { sfx, confettiBurstAtElement as confettiAt, countUp } from "./app-shell.js";
 
 // ---------- cursor ring ----------
 const cursor = document.querySelector('.cursor-ring');
@@ -75,8 +76,11 @@ document.getElementById('unlockBtn').addEventListener('click', () => {
     lockCard.style.display = 'none';
     qrProtected.style.display = 'block';
     renderHistory();
+    sfx.play('success');
+    confettiAt(document.getElementById('unlockBtn'), { count: 60, power: 7 });
   } else {
     document.getElementById('lockError').style.display = 'block';
+    sfx.play('error');
   }
 });
 if (sessionStorage.getItem('authorized') === 'true') {
@@ -210,9 +214,11 @@ document.getElementById('toggleActiveBtn').addEventListener('click', async () =>
     await updateDoc(doc(db, 'sessions', currentSessionId), { active: newActive });
     currentSessionActive = newActive;
     updateSessionStatusUI(newActive);
+    sfx.play(newActive ? 'pop' : 'warn');
     showToast(newActive ? 'Session reopened.' : 'Session ended — no new registrations will be accepted.', newActive ? '' : 'warn');
   } catch (err) {
     console.error(err);
+    sfx.play('error');
     showToast('Could not update session status.', 'error');
   }
 });
@@ -268,8 +274,9 @@ document.getElementById('createSessionBtn').addEventListener('click', async () =
       await updateDoc(doc(db, 'sessions', sessionId), { name, fields });
       updateHistoryName(sessionId, name);
       showToast(`Session "${name}" updated.`);
-      resetToNewSessionForm();
+      sfx.play('pop');
       displaySessionQR(sessionId, name, currentSessionId === sessionId ? currentSessionActive : true);
+      resetToNewSessionForm();
     } else {
       const docRef = await addDoc(collection(db, 'sessions'), { name, createdAt: serverTimestamp(), active: true, fields });
       saveToHistory(docRef.id, name);
@@ -277,10 +284,13 @@ document.getElementById('createSessionBtn').addEventListener('click', async () =
       showToast(`Session "${name}" created.`);
       displaySessionQR(docRef.id, name, true);
       resetToNewSessionForm();
+      sfx.play('big');
+      confettiAt(document.getElementById('badgeContainer'), { count: 140, power: 10 });
     }
   } catch (err) {
     console.error(err);
     showToast('Could not save session — check your Firebase config.', 'error');
+    sfx.play('error');
     btn.textContent = wasEditing ? 'Save Changes' : 'Create Session & Get QR';
   } finally {
     btn.disabled = false;
@@ -437,8 +447,8 @@ picker.addEventListener('change', async () => {
 
     if (!latestRegistrations.length) {
       table.style.display = 'none'; empty.style.display = 'block';
-      document.getElementById('registeredCount').textContent = '0';
-      document.getElementById('checkedInCount').textContent = '0';
+      countUp(document.getElementById('registeredCount'), 0);
+      countUp(document.getElementById('checkedInCount'), 0);
       return;
     }
     table.style.display = 'table'; empty.style.display = 'none';
@@ -449,11 +459,12 @@ picker.addEventListener('change', async () => {
       const cells = liveFields.map(f => `<td>${escapeHtml(r[f.id] ?? '')}</td>`).join('');
       return `<tr>${cells}<td>${r.checkedIn ? '<span class="status-pill in">Checked In</span>' : '<span class="status-pill out">Not Yet</span>'}</td><td>${time}</td></tr>`;
     }).join('');
-    document.getElementById('registeredCount').textContent = latestRegistrations.length;
-    document.getElementById('checkedInCount').textContent = checkedIn;
+    countUp(document.getElementById('registeredCount'), latestRegistrations.length);
+    countUp(document.getElementById('checkedInCount'), checkedIn);
     document.getElementById('liveDot').classList.add('live');
   }, (err) => {
     console.error(err);
+    sfx.play('error');
     showToast('Live feed lost connection — check your Firestore rules.', 'error');
   });
 });
@@ -479,5 +490,6 @@ document.getElementById('exportCsvBtn').addEventListener('click', () => {
   a.download = `${(liveSessionName || 'attendance').replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.csv`;
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
+  sfx.play('pop');
   showToast('CSV downloaded.');
 });

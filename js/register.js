@@ -2,6 +2,7 @@ import { db } from "./firebase-config.js";
 import {
   doc, getDoc, collection, addDoc, query, where, getDocs, limit, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { sfx, confettiBurstAtElement as confettiAt, buzz } from "./app-shell.js";
 
 const params = new URLSearchParams(location.search);
 const sessionId = params.get('session');
@@ -114,6 +115,7 @@ document.getElementById('regForm').addEventListener('submit', async (e) => {
     showQr(registrationId, displayName);
   } catch (err) {
     console.error(err);
+    sfx.play('error');
     alert('Something went wrong submitting your registration. Please try again.');
   } finally {
     btn.disabled = false; btn.textContent = 'Get My QR Code';
@@ -136,6 +138,11 @@ function showQr(registrationId, name) {
   });
   qrDiv.classList.add('pop');
 
+  // celebration: fanfare + haptic tick + confetti over the fresh badge
+  sfx.play('big');
+  buzz([30, 50, 30]);
+  confettiAt(document.querySelector('#qrState .badge-box'), { count: 170, power: 11 });
+
   document.getElementById('downloadQrBtn').onclick = () => {
     const canvas = qrDiv.querySelector('canvas');
     if (!canvas) return;
@@ -143,6 +150,7 @@ function showQr(registrationId, name) {
     a.download = `${name.replace(/\s+/g, '_')}_attendance_qr.png`;
     a.href = canvas.toDataURL('image/png');
     a.click();
+    sfx.play('pop');
   };
 }
 

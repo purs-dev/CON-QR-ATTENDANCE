@@ -11,12 +11,13 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/fireba
 import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const firebaseConfig = {
-  apiKey: "AIzaSy...",
+  apiKey: "AIzaSyBFCTkMlx95BAOLgg5M7B2W9s5UnpxhFq8",
   authDomain: "spcf-con-attendance.firebaseapp.com",
   projectId: "spcf-con-attendance",
-  storageBucket: "spcf-con-attendance.appspot.com",
-  messagingSenderId: "123456789",
-  appId: "1:123456789:web:abc123"
+  storageBucket: "spcf-con-attendance.firebasestorage.app",
+  messagingSenderId: "700930891597",
+  appId: "1:700930891597:web:7b09c69cec89c7409f6104",
+  measurementId: "G-M0QVHY6450"
 };
 
 const app = initializeApp(firebaseConfig);

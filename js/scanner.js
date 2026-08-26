@@ -2,6 +2,7 @@ import { db } from "./firebase-config.js";
 import {
   doc, getDoc, updateDoc, collection, query, where, getDocs, orderBy, limit, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { sfx, confettiBurstAtElement as confettiAt, buzz } from "./app-shell.js";
 
 // ---------- toast (for camera-level errors) ----------
 function showToast(message, type = '') {
@@ -74,6 +75,8 @@ async function checkIn(sessionId, registrationId) {
 
     if (!snap.exists()) {
       flash('Unknown code — not found in this session.', 'error');
+      sfx.play('error');
+      buzz(120);
       return;
     }
 
@@ -83,6 +86,8 @@ async function checkIn(sessionId, registrationId) {
     if (data.checkedIn) {
       const time = data.checkedInAt ? data.checkedInAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
       flash(`${name} already checked in ${time ? 'at ' + time : ''}`, 'warn');
+      sfx.play('warn');
+      buzz(80);
       return;
     }
 
@@ -90,9 +95,14 @@ async function checkIn(sessionId, registrationId) {
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     flash(`✓ ${name} checked in`, 'success');
     addRecent(name, now);
+    sfx.play('success');
+    buzz([40, 60, 40]);
+    confettiAt(document.getElementById('scanFlash'), { count: 110, power: 9 });
   } catch (err) {
     console.error(err);
     flash('Connection problem — could not record check-in.', 'error');
+    sfx.play('error');
+    buzz(120);
   }
 }
 
@@ -109,6 +119,8 @@ function onScanSuccess(decodedText) {
   const parts = decodedText.split('|');
   if (parts.length !== 2) {
     flash('Not a recognized attendance QR.', 'error');
+    sfx.play('error');
+    buzz(120);
     return;
   }
   const [sessionId, registrationId] = parts;
