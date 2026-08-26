@@ -404,3 +404,62 @@ a, button, .nav-link, .history-item, .form-select{ transition: color .18s, backg
   #reader::after{ display:none; }
   .pwa-install-btn{ animation:none; }
 }
+
+/* ---------- scanner camera diagnostics card ---------- */
+#reader.cam-error{
+  background:var(--cream); border:1.5px dashed var(--line-soft); border-radius:8px;
+  min-height:230px; display:flex; align-items:center; justify-content:center;
+}
+#reader.cam-error::after{ display:none; }
+.camera-error{ padding:40px 24px; text-align:center; width:100%; }
+.camera-error .ce-icon{ font-size:38px; margin-bottom:12px; }
+.camera-error h3{ font-size:17px; font-weight:800; color:var(--forest); margin-bottom:10px; }
+.camera-error p{ font-size:13px; line-height:1.65; color:var(--ink-soft); max-width:330px; margin:0 auto 18px; }
+
+/* ---------- install help sheet (iOS guidance / manual install) ---------- */
+#installHelpSheet{
+  position:fixed; inset:0; z-index:2800;
+  background:rgba(10,31,24,.72); backdrop-filter:blur(5px);
+  display:flex; align-items:center; justify-content:center; padding:20px;
+  animation:fadeIn .25s var(--ease);
+}
+@keyframes fadeIn{ from{ opacity:0; } to{ opacity:1; } }
+.ih-card{
+  position:relative; background:var(--cream); color:var(--ink);
+  max-width:400px; width:100%; border-radius:16px; padding:30px 26px;
+  box-shadow:0 30px 70px rgba(0,0,0,.5);
+  animation:sheetUp .35s var(--ease);
+}
+@keyframes sheetUp{ from{ transform:translateY(30px); opacity:0; } to{ transform:none; opacity:1; } }
+.ih-close{
+  position:absolute; top:12px; right:14px; border:none; background:none;
+  font-size:26px; line-height:1; color:var(--ink-soft); cursor:pointer; padding:0;
+}
+.ih-close:hover{ color:var(--ink); }
+.ih-badge{
+  width:46px; height:46px; border-radius:12px; margin-bottom:14px;
+  display:flex; align-items:center; justify-content:center;
+  background:linear-gradient(135deg,var(--gold-bright),var(--gold));
+  color:#0B1710; font-size:22px; font-weight:800;
+}
+.ih-card h3{ font-size:19px; font-weight:800; color:var(--forest); margin-bottom:16px; }
+.ih-steps{ list-style:none; margin:0 0 14px; padding:0; }
+.ih-steps li{
+  display:flex; gap:12px; align-items:flex-start; margin-bottom:12px;
+  font-size:13.5px; line-height:1.6; color:var(--ink);
+}
+.step-num{
+  flex-shrink:0; width:22px; height:22px; border-radius:50%;
+  background:var(--forest); color:var(--cream); font-size:11px; font-weight:800;
+  display:flex; align-items:center; justify-content:center; margin-top:2px;
+}
+.ios-glyph{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:20px; height:20px; border-radius:5px; margin:0 2px;
+  border:1.5px solid var(--forest); color:var(--forest);
+  font-size:12px; font-weight:800; vertical-align:-4px;
+}
+.ih-note{
+  font-size:11.5px; color:var(--ink-soft); line-height:1.6;
+  border-top:1.5px solid var(--line-soft); padding-top:12px; margin:0;
+}

@@ -106,7 +106,7 @@ async function checkIn(sessionId, registrationId) {
   }
 }
 
-// ---------- camera scanning ----------
+// ---------- scan handling ----------
 let lastText = '';
 let lastTime = 0;
 
@@ -127,26 +127,80 @@ function onScanSuccess(decodedText) {
   checkIn(sessionId, registrationId);
 }
 
+// ---------- camera scanning ----------
+const readerEl = document.getElementById('reader');
 const html5QrCode = new Html5Qrcode('reader');
-Html5Qrcode.getCameras().then(cameras => {
-  if (!cameras || !cameras.length) {
-    showToast('No camera found — use manual check-in below.', 'error');
+
+function showCameraError(title, hint, showRetry = true) {
+  readerEl.classList.add('cam-error');
+  readerEl.innerHTML = `
+    <div class="camera-error">
+      <div class="ce-icon">📷</div>
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(hint)}</p>
+      ${showRetry ? '<button class="btn btn-primary" id="cameraRetryBtn">Retry Camera</button>' : ''}
+    </div>`;
+  const retry = document.getElementById('cameraRetryBtn');
+  if (retry) retry.addEventListener('click', () => {
+    readerEl.classList.remove('cam-error');
+    readerEl.innerHTML = '';
+    startCamera();
+  });
+  showToast(hint, 'error');
+}
+
+function cameraErrorFromException(err) {
+  const name = String((err && (err.name || err.message)) || err);
+  if (/NotAllowed|PermissionDenied/i.test(name)) {
+    showCameraError('Camera permission denied',
+      'Allow camera access for this site (check the padlock / permissions in the address bar), then tap Retry.');
+  } else if (/NotFound|DevicesNotFound|Overconstrained/i.test(name)) {
+    showCameraError('No camera found',
+      'No usable camera was detected on this device — use manual check-in below.', false);
+  } else if (/NotReadable|TrackStart|InUse/i.test(name)) {
+    showCameraError('Camera is busy',
+      'Another app or browser tab is using the camera. Close it, then tap Retry.');
+  } else {
+    showCameraError('Could not start camera',
+      'Something went wrong starting the camera. Retry, or use manual check-in below.');
+  }
+}
+
+function startCamera() {
+  if (!window.isSecureContext) {
+    showCameraError('Camera needs a secure connection',
+      'Browsers only allow camera access on HTTPS or localhost. Open this page via https://… or http://localhost — not by double-clicking the file or via a plain-HTTP network address.',
+      false);
     return;
   }
-  const backCam = cameras.find(c => /back|rear|environment/i.test(c.label)) || cameras[cameras.length - 1];
-  html5QrCode.start(
-    backCam.id,
-    { fps: 10, qrbox: 250 },
-    onScanSuccess,
-    () => {} // ignore per-frame "no QR found" callbacks
-  ).catch(err => {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showCameraError('Camera not supported',
+      'This browser does not expose camera access. Try Chrome, Edge, or Safari.', false);
+    return;
+  }
+
+  Html5Qrcode.getCameras().then(cameras => {
+    if (!cameras || !cameras.length) {
+      showCameraError('No camera found',
+        'No camera was detected on this device — use manual check-in below.', false);
+      return;
+    }
+    const backCam = cameras.find(c => /back|rear|environment/i.test(c.label)) || cameras[cameras.length - 1];
+    html5QrCode.start(
+      backCam.id,
+      { fps: 10, qrbox: 250 },
+      onScanSuccess,
+      () => {} // ignore per-frame "no QR found" callbacks
+    ).catch(err => {
+      console.error(err);
+      cameraErrorFromException(err);
+    });
+  }).catch(err => {
     console.error(err);
-    showToast('Could not start camera — check browser permissions.', 'error');
+    cameraErrorFromException(err);
   });
-}).catch(err => {
-  console.error(err);
-  showToast('Camera access unavailable. Use manual check-in below.', 'error');
-});
+}
+startCamera();
 
 // ---------- manual check-in fallback ----------
 const manualSession = document.getElementById('manualSession');

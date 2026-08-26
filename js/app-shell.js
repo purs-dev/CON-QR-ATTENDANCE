@@ -237,10 +237,16 @@ function confettiLoop() {
 })();
 
 /* ---------------------------------------------------------------------
-   Install App button — appears when the browser offers installation
+   Install App button
+   • Android/desktop: uses the native beforeinstallprompt flow
+   • iPhone/iPad: Apple never fires install prompts — the only way is the
+     manual Share → "Add to Home Screen" flow, so we detect iOS and show
+     step-by-step instructions instead.
 --------------------------------------------------------------------- */
 let deferredPrompt = null;
 const DISMISS_KEY = 'con_install_dismissed';
+const IS_IOS = /iP(hone|ad|od)/i.test(navigator.userAgent) ||
+               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
 function buildInstallButton() {
   let btn = document.getElementById('pwaInstallBtn');
@@ -249,14 +255,17 @@ function buildInstallButton() {
   btn.id = 'pwaInstallBtn';
   btn.className = 'pwa-install-btn';
   btn.type = 'button';
-  btn.innerHTML = `<span class="ico">&#8681;</span><span>Install App</span><span class="kill" role="button" aria-label="Dismiss" title="Dismiss">&times;</span>`;
+  btn.innerHTML = `<span class="ico">&#8681;</span><span class="label">Install App</span><span class="kill" role="button" aria-label="Dismiss" title="Dismiss">&times;</span>`;
   btn.addEventListener('click', async (e) => {
     if (e.target.classList.contains('kill')) {
       localStorage.setItem(DISMISS_KEY, '1');
       hideInstallButton();
       return;
     }
-    if (!deferredPrompt) return;
+    if (IS_IOS || !deferredPrompt) {
+      showInstallHelp();
+      return;
+    }
     deferredPrompt.prompt();
     const { outcome } = await deferredPrompt.userChoice.catch(() => ({ outcome: 'dismissed' }));
     if (outcome === 'accepted') {
@@ -275,6 +284,51 @@ function hideInstallButton() {
   document.getElementById('pwaInstallBtn')?.classList.remove('show');
 }
 
+function maybeShowInstallButton() {
+  if (IS_STANDALONE) return;
+  if (localStorage.getItem(DISMISS_KEY) === '1' || localStorage.getItem('con_installed') === '1') return;
+  const btn = buildInstallButton();
+  if (IS_IOS) {
+    btn.querySelector('.label').textContent = 'Add to Home Screen';
+    btn.classList.add('ios');
+  }
+  btn.classList.add('show');
+}
+
+function showInstallHelp() {
+  if (document.getElementById('installHelpSheet')) return;
+
+  const iosSteps = `
+    <ol class="ih-steps">
+      <li><span class="step-num">1</span><div>Open this page in <b>Safari</b>, then tap the <b>Share</b> button <span class="ios-glyph">&#8593;</span> (bottom of the screen on iPhone, top on iPad).</div></li>
+      <li><span class="step-num">2</span><div>Scroll down the share menu and tap <b>Add to Home Screen</b>.</div></li>
+      <li><span class="step-num">3</span><div>Tap <b>Add</b> — launch CON Attendance from your home screen for full-screen app mode.</div></li>
+    </ol>
+    <p class="ih-note">Apple doesn't allow automatic install prompts on iPhone/iPad — this one-time manual step is how every web app is installed on iOS.</p>`;
+
+  const otherSteps = `
+    <ol class="ih-steps">
+      <li><span class="step-num">1</span><div><b>Android</b>: tap the <b>&#8942;</b> menu &rarr; <b>Install app</b> (or <i>Add to Home screen</i>).</div></li>
+      <li><span class="step-num">2</span><div><b>PC (Chrome/Edge)</b>: click the install icon in the address bar, or menu &rarr; <b>Install app</b>.</div></li>
+      <li><span class="step-num">3</span><div>Open CON Attendance from your home screen or desktop like any other app.</div></li>
+    </ol>
+    <p class="ih-note">The one-tap install prompt appears automatically when your browser is ready — this guide works any time.</p>`;
+
+  const sheet = document.createElement('div');
+  sheet.id = 'installHelpSheet';
+  sheet.innerHTML = `
+    <div class="ih-card">
+      <button class="ih-close" aria-label="Close">&times;</button>
+      <div class="ih-badge">&#8681;</div>
+      <h3>${IS_IOS ? 'Install on iPhone / iPad' : 'Install the app'}</h3>
+      ${IS_IOS ? iosSteps : otherSteps}
+    </div>`;
+  sheet.addEventListener('click', (e) => {
+    if (e.target === sheet || e.target.classList.contains('ih-close')) sheet.remove();
+  });
+  document.body.appendChild(sheet);
+}
+
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   deferredPrompt = e;
@@ -282,6 +336,7 @@ window.addEventListener('beforeinstallprompt', (e) => {
   if (localStorage.getItem(DISMISS_KEY) === '1' || localStorage.getItem('con_installed') === '1') return;
   buildInstallButton().classList.add('show');
 });
+maybeShowInstallButton();
 
 window.addEventListener('appinstalled', () => {
   localStorage.setItem('con_installed', '1');
