@@ -1,6 +1,7 @@
 import { db } from "./firebase-config.js";
 import {
-  doc, getDoc, updateDoc, collection, query, where, getDocs, orderBy, limit, serverTimestamp
+  doc, getDoc, collection, query, where, getDocs, orderBy, limit, serverTimestamp,
+  runTransaction, getCountFromServer, onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { sfx, confettiBurstAtElement as confettiAt, buzz } from "./app-shell.js";
 
@@ -67,37 +68,91 @@ function getDisplayName(data) {
   return key ? data[key] : 'Student';
 }
 
+// ---------- session helpers (multi-device / multi-level aware) ----------
+const sessionNameCache = new Map();
+async function getSessionName(sessionId) {
+  if (sessionNameCache.has(sessionId)) return sessionNameCache.get(sessionId);
+  try {
+    const snap = await getDoc(doc(db, 'sessions', sessionId));
+    const name = snap.exists() ? snap.data().name : 'Unknown session';
+    sessionNameCache.set(sessionId, name);
+    return name;
+  } catch (err) {
+    console.warn(err);
+    return 'Unknown session';
+  }
+}
+
+// Live per-session total (same number on every scanner device)
+async function updateSessionChip(sessionId) {
+  try {
+    const q = query(collection(db, 'sessions', sessionId, 'registrations'), where('checkedIn', '==', true));
+    const total = (await getCountFromServer(q)).data().count;
+    let chips = document.getElementById('sessionChips');
+    if (!chips) {
+      chips = document.createElement('div');
+      chips.id = 'sessionChips';
+      chips.className = 'session-chips';
+      const list = document.getElementById('recentList');
+      list.parentNode.insertBefore(chips, list);
+    }
+    let chip = chips.querySelector(`[data-session="${sessionId}"]`);
+    if (!chip) {
+      chip = document.createElement('span');
+      chip.className = 'session-chip';
+      chip.dataset.session = sessionId;
+      chips.appendChild(chip);
+    }
+    const name = await getSessionName(sessionId);
+    chip.textContent = `${name}: ${total} checked in`;
+  } catch (err) {
+    console.warn('[scanner] chip update failed:', err);
+  }
+}
+
 // ---------- core check-in logic (shared by camera scan + manual entry) ----------
+// Uses a transaction: if two scanner devices scan the same student at the
+// same moment, exactly ONE wins and the other shows "already checked in".
 async function checkIn(sessionId, registrationId) {
   try {
     const ref = doc(db, 'sessions', sessionId, 'registrations', registrationId);
-    const snap = await getDoc(ref);
+    const sessionName = await getSessionName(sessionId);
 
-    if (!snap.exists()) {
-      flash('Unknown code — not found in this session.', 'error');
+    let outcome = null;
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists()) { outcome = { status: 'unknown' }; return; }
+      const data = snap.data();
+      const name = getDisplayName(data);
+      if (data.checkedIn) {
+        const time = data.checkedInAt ? data.checkedInAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+        outcome = { status: 'already', name, time };
+        return;
+      }
+      tx.update(ref, { checkedIn: true, checkedInAt: serverTimestamp() });
+      outcome = { status: 'ok', name };
+    });
+
+    if (!outcome || outcome.status === 'unknown') {
+      flash(`Unknown code — not found in ${sessionName}.`, 'error');
       sfx.play('error');
       buzz(120);
       return;
     }
-
-    const data = snap.data();
-    const name = getDisplayName(data);
-
-    if (data.checkedIn) {
-      const time = data.checkedInAt ? data.checkedInAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-      flash(`${name} already checked in ${time ? 'at ' + time : ''}`, 'warn');
+    if (outcome.status === 'already') {
+      flash(`${outcome.name} already checked in ${outcome.time ? 'at ' + outcome.time : ''} · ${sessionName}`, 'warn');
       sfx.play('warn');
       buzz(80);
       return;
     }
 
-    await updateDoc(ref, { checkedIn: true, checkedInAt: serverTimestamp() });
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    flash(`✓ ${name} checked in`, 'success');
-    addRecent(name, now);
+    flash(`✓ ${outcome.name} checked in · ${sessionName}`, 'success');
+    addRecent(`[${sessionName}] ${outcome.name}`, now);
     sfx.play('success');
     buzz([40, 60, 40]);
     confettiAt(document.getElementById('scanFlash'), { count: 110, power: 9 });
+    updateSessionChip(sessionId);
   } catch (err) {
     console.error(err);
     flash('Connection problem — could not record check-in.', 'error');
@@ -129,9 +184,19 @@ function onScanSuccess(decodedText) {
 
 // ---------- camera scanning ----------
 const readerEl = document.getElementById('reader');
-const html5QrCode = new Html5Qrcode('reader');
+let html5QrCode = null;
+let cameraStarting = false;
+let busyRetries = 0;
+
+function freshScanner() {
+  try { html5QrCode && html5QrCode.stop(); } catch (_) { /* wasn't running */ }
+  try { html5QrCode && html5QrCode.clear(); } catch (_) { /* nothing rendered */ }
+  readerEl.innerHTML = '';
+  html5QrCode = new Html5Qrcode('reader');
+}
 
 function showCameraError(title, hint, showRetry = true) {
+  cameraStarting = false;
   readerEl.classList.add('cam-error');
   readerEl.innerHTML = `
     <div class="camera-error">
@@ -142,8 +207,7 @@ function showCameraError(title, hint, showRetry = true) {
     </div>`;
   const retry = document.getElementById('cameraRetryBtn');
   if (retry) retry.addEventListener('click', () => {
-    readerEl.classList.remove('cam-error');
-    readerEl.innerHTML = '';
+    busyRetries = 0;
     startCamera();
   });
   showToast(hint, 'error');
@@ -151,25 +215,37 @@ function showCameraError(title, hint, showRetry = true) {
 
 function cameraErrorFromException(err) {
   const name = String((err && (err.name || err.message)) || err);
+
+  // "Camera busy" is often transient — the previous getUserMedia hasn't
+  // fully released the device yet. Auto-retry twice before giving up.
+  if (/NotReadable|TrackStart|InUse/i.test(name) && busyRetries < 2) {
+    busyRetries++;
+    setTimeout(startCamera, 1200 * busyRetries);
+    return;
+  }
+
   if (/NotAllowed|PermissionDenied/i.test(name)) {
     showCameraError('Camera permission denied',
-      'Allow camera access for this site (check the padlock / permissions in the address bar), then tap Retry.');
+      'Allow camera access for this site: click the camera/padlock icon in the address bar, set Camera to "Allow", then tap Retry.');
   } else if (/NotFound|DevicesNotFound|Overconstrained/i.test(name)) {
     showCameraError('No camera found',
       'No usable camera was detected on this device — use manual check-in below.', false);
   } else if (/NotReadable|TrackStart|InUse/i.test(name)) {
     showCameraError('Camera is busy',
-      'Another app or browser tab is using the camera. Close it, then tap Retry.');
+      'Another tab or app is holding the camera. Close the other CON Attendance tab (and apps like Zoom/Teams), then tap Retry. You can also click the camera icon in the address bar to release it.');
   } else {
     showCameraError('Could not start camera',
       'Something went wrong starting the camera. Retry, or use manual check-in below.');
   }
 }
 
-function startCamera() {
+async function startCamera() {
+  if (cameraStarting) return;
+  cameraStarting = true;
+
   if (!window.isSecureContext) {
     showCameraError('Camera needs a secure connection',
-      'Browsers only allow camera access on HTTPS or localhost. Open this page via https://… or http://localhost — not by double-clicking the file or via a plain-HTTP network address.',
+      'Browsers only allow camera access on HTTPS or localhost. Open this page via https://… — not by double-clicking the file or over plain HTTP.',
       false);
     return;
   }
@@ -179,44 +255,87 @@ function startCamera() {
     return;
   }
 
-  Html5Qrcode.getCameras().then(cameras => {
+  readerEl.classList.remove('cam-error');
+  freshScanner();
+
+  // Preferred: ONE getUserMedia call with a facing-mode constraint. The old
+  // approach (list cameras first, then open) opens and closes the camera
+  // twice in a row, which triggers "camera busy" on many Windows machines.
+  try {
+    await html5QrCode.start(
+      { facingMode: 'environment' },
+      { fps: 10, qrbox: 250 },
+      onScanSuccess,
+      () => {} // ignore per-frame "no QR found" callbacks
+    );
+    busyRetries = 0;
+    cameraStarting = false;
+    return;
+  } catch (err) {
+    console.warn('[scanner] facing-mode start failed, trying device list:', err);
+  }
+
+  // Fallback: enumerate cameras and open the explicit back/rear one
+  // (needed on some multi-camera phones).
+  try {
+    const cameras = await Html5Qrcode.getCameras();
     if (!cameras || !cameras.length) {
       showCameraError('No camera found',
         'No camera was detected on this device — use manual check-in below.', false);
       return;
     }
     const backCam = cameras.find(c => /back|rear|environment/i.test(c.label)) || cameras[cameras.length - 1];
-    html5QrCode.start(
+    await html5QrCode.start(
       backCam.id,
       { fps: 10, qrbox: 250 },
       onScanSuccess,
-      () => {} // ignore per-frame "no QR found" callbacks
-    ).catch(err => {
-      console.error(err);
-      cameraErrorFromException(err);
-    });
-  }).catch(err => {
+      () => {}
+    );
+    busyRetries = 0;
+  } catch (err) {
     console.error(err);
     cameraErrorFromException(err);
-  });
+  } finally {
+    cameraStarting = false;
+  }
 }
 startCamera();
 
 // ---------- manual check-in fallback ----------
 const manualSession = document.getElementById('manualSession');
+const sessionHint = document.getElementById('sessionHint');
 
-async function loadManualSessions() {
-  const q = query(collection(db, 'sessions'), orderBy('createdAt', 'desc'), limit(20));
-  const snap = await getDocs(q);
-  manualSession.innerHTML = '<option value="">— Select a session —</option>';
-  snap.forEach(d => {
-    const opt = document.createElement('option');
-    opt.value = d.id;
-    opt.textContent = d.data().name;
-    manualSession.appendChild(opt);
+// Live-sync the manual check-in dropdown with ALL ACTIVE sessions.
+// The old version loaded once at page open — sessions created afterward
+// never appeared on other scanner devices, and any transient failure left
+// the list silently empty. Now it updates in real time and auto-retries.
+let sessionsUnsubscribe = null;
+function watchActiveSessions() {
+  if (sessionsUnsubscribe) sessionsUnsubscribe();
+  const q = query(collection(db, 'sessions'), orderBy('createdAt', 'desc'), limit(50));
+  sessionsUnsubscribe = onSnapshot(q, (snap) => {
+    const current = manualSession.value;
+    const active = [];
+    snap.forEach(d => {
+      const data = d.data();
+      if (data.active === false) return; // ended sessions are hidden
+      active.push({ id: d.id, name: data.name || 'Untitled session' });
+    });
+    manualSession.innerHTML = '<option value="">— Select a session —</option>' +
+      active.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}</option>`).join('');
+    if (current && active.some(s => s.id === current)) manualSession.value = current;
+    if (sessionHint) sessionHint.style.display = active.length ? 'none' : 'block';
+  }, (err) => {
+    console.error(err);
+    if (sessionHint) {
+      sessionHint.textContent = 'Could not load sessions — retrying…';
+      sessionHint.style.display = 'block';
+    }
+    showToast('Could not load sessions — check connection / Firestore rules. Retrying…', 'error');
+    setTimeout(watchActiveSessions, 4000);
   });
 }
-loadManualSessions();
+watchActiveSessions();
 
 document.getElementById('manualBtn').addEventListener('click', async () => {
   const sessionId = manualSession.value;

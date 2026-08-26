@@ -414,6 +414,7 @@ loadSessionOptions();
 function resetLiveUI() {
   document.getElementById('responseTable').style.display = 'none';
   document.getElementById('emptyState').style.display = 'block';
+  document.getElementById('tableNote').style.display = 'none';
   document.getElementById('registeredCount').textContent = '0';
   document.getElementById('checkedInCount').textContent = '0';
   document.getElementById('liveDot').classList.remove('live');
@@ -421,8 +422,51 @@ function resetLiveUI() {
   latestRegistrations = [];
 }
 
+// Large-event hardening: render at most the newest MAX_RENDER_ROWS rows and
+// throttle re-renders — counts and CSV export always include EVERYONE.
+const MAX_RENDER_ROWS = 300;
+let renderTimer = null;
+
+function renderLiveTable() {
+  renderTimer = null;
+  const table = document.getElementById('responseTable');
+  const empty = document.getElementById('emptyState');
+  const body = document.getElementById('tableBody');
+  const note = document.getElementById('tableNote');
+
+  if (!latestRegistrations.length) {
+    table.style.display = 'none'; empty.style.display = 'block';
+    note.style.display = 'none';
+    countUp(document.getElementById('registeredCount'), 0);
+    countUp(document.getElementById('checkedInCount'), 0);
+    return;
+  }
+
+  table.style.display = 'table'; empty.style.display = 'none';
+  let checkedIn = 0;
+  for (const r of latestRegistrations) if (r.checkedIn) checkedIn++;
+
+  body.innerHTML = latestRegistrations.slice(0, MAX_RENDER_ROWS).map(r => {
+    const time = r.checkedInAt ? r.checkedInAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
+    const cells = liveFields.map(f => `<td>${escapeHtml(r[f.id] ?? '')}</td>`).join('');
+    return `<tr>${cells}<td>${r.checkedIn ? '<span class="status-pill in">Checked In</span>' : '<span class="status-pill out">Not Yet</span>'}</td><td>${time}</td></tr>`;
+  }).join('');
+
+  if (latestRegistrations.length > MAX_RENDER_ROWS) {
+    note.textContent = `Showing the newest ${MAX_RENDER_ROWS} of ${latestRegistrations.length.toLocaleString()} registrations — totals and CSV export include everyone.`;
+    note.style.display = 'block';
+  } else {
+    note.style.display = 'none';
+  }
+
+  countUp(document.getElementById('registeredCount'), latestRegistrations.length);
+  countUp(document.getElementById('checkedInCount'), checkedIn);
+  document.getElementById('liveDot').classList.add('live');
+}
+
 picker.addEventListener('change', async () => {
   if (unsubscribeLive) unsubscribeLive();
+  if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
   const sessionId = picker.value;
   if (!sessionId) { resetLiveUI(); return; }
 
@@ -436,32 +480,13 @@ picker.addEventListener('change', async () => {
   document.getElementById('tableHead').innerHTML =
     liveFields.map(f => `<th>${escapeHtml(f.label)}</th>`).join('') + '<th>Status</th><th>Checked In</th>';
 
-  const table = document.getElementById('responseTable');
-  const empty = document.getElementById('emptyState');
-  const body = document.getElementById('tableBody');
-
   const q = query(collection(db, 'sessions', sessionId, 'registrations'), orderBy('registeredAt', 'desc'));
   unsubscribeLive = onSnapshot(q, (snap) => {
     latestRegistrations = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     document.getElementById('exportCsvBtn').disabled = latestRegistrations.length === 0;
-
-    if (!latestRegistrations.length) {
-      table.style.display = 'none'; empty.style.display = 'block';
-      countUp(document.getElementById('registeredCount'), 0);
-      countUp(document.getElementById('checkedInCount'), 0);
-      return;
-    }
-    table.style.display = 'table'; empty.style.display = 'none';
-    let checkedIn = 0;
-    body.innerHTML = latestRegistrations.map(r => {
-      if (r.checkedIn) checkedIn++;
-      const time = r.checkedInAt ? r.checkedInAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
-      const cells = liveFields.map(f => `<td>${escapeHtml(r[f.id] ?? '')}</td>`).join('');
-      return `<tr>${cells}<td>${r.checkedIn ? '<span class="status-pill in">Checked In</span>' : '<span class="status-pill out">Not Yet</span>'}</td><td>${time}</td></tr>`;
-    }).join('');
-    countUp(document.getElementById('registeredCount'), latestRegistrations.length);
-    countUp(document.getElementById('checkedInCount'), checkedIn);
-    document.getElementById('liveDot').classList.add('live');
+    // During mass registration/check-in bursts Firestore fires many snapshots
+    // per second — render at most 4x/second to keep the UI smooth.
+    if (!renderTimer) renderTimer = setTimeout(renderLiveTable, 250);
   }, (err) => {
     console.error(err);
     sfx.play('error');
