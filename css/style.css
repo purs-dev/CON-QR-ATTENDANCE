@@ -258,16 +258,17 @@ tr.row-new td{ animation:rowFlash 2.2s ease-out; }
 }
 .session-chip:hover{ border-color:var(--mint); background:rgba(47,230,176,.08); }
 
-/* camera switch button on the scanner */
+/* camera switch button on the scanner — clean & minimal */
 .scan-toolbar{ justify-content:flex-end; }
 .switch-cam-btn{
-  width:44px; height:44px; border-radius:12px !important; font-size:19px; line-height:1;
-  padding:0 !important; display:inline-flex; align-items:center; justify-content:center;
-  background:var(--forest) !important; border:1.5px solid var(--pine-light) !important; color:var(--cream) !important;
+  width:38px; height:38px; border-radius:50%; font-size:18px; line-height:1;
+  padding:0; display:inline-flex; align-items:center; justify-content:center;
+  background:transparent; border:1px solid var(--line-soft); color:var(--ink-soft);
+  cursor:pointer; transition:color .15s, border-color .15s, background .15s;
 }
-.switch-cam-btn:hover{ transform:translateY(-2px); box-shadow:0 5px 0 0 var(--gold); }
-.switch-cam-btn:disabled{ opacity:.45; }
-.switch-cam-btn:active{ transform:scale(.94); }
+.switch-cam-btn:hover{ color:var(--forest); border-color:var(--pine-light); background:rgba(11,61,46,.06); }
+.switch-cam-btn:disabled{ opacity:.4; }
+.switch-cam-btn:active{ background:rgba(11,61,46,.12); }
 
 /* name/ID search result picker on the scanner */
 .search-results{ background:rgba(11,61,46,0.06); border-radius:10px; padding:12px; }
@@ -414,6 +415,17 @@ a, button, .nav-link, .history-item, .form-select{ transition: color .18s, backg
 @keyframes bannerDrop{ from{ transform:translate(-50%,-80px); opacity:0; } to{ transform:translate(-50%,0); opacity:1; } }
 @keyframes fadeAway{ to{ opacity:0; visibility:hidden; } }
 
+/* ---------- scanner: sweeping laser line over the camera view ---------- */
+#reader{ position:relative; }
+#reader::after{
+  content:""; position:absolute; left:6%; right:6%; top:10%; height:2px; border-radius:2px;
+  background:linear-gradient(90deg, transparent, var(--mint), transparent);
+  box-shadow:0 0 14px rgba(47,230,176,.7);
+  animation:laserSweep 2.4s ease-in-out infinite;
+  pointer-events:none; z-index:5; opacity:.8;
+}
+@keyframes laserSweep{ 0%{ top:10%; } 50%{ top:88%; } 100%{ top:10%; } }
+
 /* ---------- scan result flash: springy pop-in ---------- */
 .scan-result-flash{ animation:flashPop .32s cubic-bezier(.34,1.56,.64,1); }
 @keyframes flashPop{ from{ transform:scale(.9); opacity:0; } to{ transform:scale(1); opacity:1; } }
@@ -435,6 +447,7 @@ a, button, .nav-link, .history-item, .form-select{ transition: color .18s, backg
 /* ---------- respect users who prefer reduced motion ---------- */
 @media (prefers-reduced-motion:reduce){
   #fx-particles, #fx-confetti{ display:none; }
+  #reader::after{ display:none; }
   .pwa-install-btn{ animation:none; }
 }
 
