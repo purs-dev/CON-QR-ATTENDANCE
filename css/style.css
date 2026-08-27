@@ -206,6 +206,12 @@ input, textarea{ cursor:text; }
 .status-pill.in::before{ content:""; width:6px; height:6px; border-radius:50%; background:var(--mint); }
 .status-pill.out{ background:rgba(11,23,16,0.08); color:var(--ink-soft); }
 .status-pill.out::before{ content:""; width:6px; height:6px; border-radius:50%; background:#9CA69E; }
+.status-pill.to{ background:rgba(212,167,61,0.2); color:#6B4E0A; }
+.status-pill.to::before{ content:""; width:6px; height:6px; border-radius:50%; background:var(--gold); }
+
+/* Time-out gate bar on the scanner */
+.gate-bar{ background:rgba(212,167,61,0.1); border:1px solid rgba(212,167,61,0.45);
+  border-radius:10px; padding:10px 12px; }
 
 /* ---------- Live feed stats ---------- */
 .stat-line{ display:flex; justify-content:space-between; align-items:center; padding:16px 0; border-bottom:1px solid var(--line-soft); }
@@ -582,7 +588,7 @@ a, button, .nav-link, .history-item, .form-select{ transition: color .18s, backg
    .table-frame is fixed-height on desktop; let it breathe on smaller vp. */
 .table-frame{ height:min(560px, 62vh); }
 .table-scroll{ overflow-x:auto; }
-.table-frame table{ min-width:520px; }
+.table-frame table{ min-width:620px; }
 
 /* Admin session rows: stack the name-line above the actions on phones. */
 .history-item{ align-items:stretch; }

@@ -160,6 +160,61 @@ document.getElementById('addFieldBtn').addEventListener('click', () => {
 });
 renderFieldsEditor();
 
+// ---------- time-out pairing ----------
+// An (OUT) session can be paired to a time-in session ("linkTo"). Students
+// can only time out there if they time-in'd for the partner first.
+const linkToSelect = document.getElementById('linkToSelect');
+async function refreshLinkToOptions(excludeId) {
+  try {
+    const snap = await getDocs(query(collection(db, 'sessions'), limit(100)));
+    linkToSelect.innerHTML = '<option value="">— Normal session (no time-out pairing) —</option>';
+    snap.forEach(d => {
+      if (d.id === excludeId) return;
+      const data = d.data();
+      if (data.archived === true) return;
+      if (data.linkTo) return; // already an OUT session — can't be a partner too
+      const opt = document.createElement('option');
+      opt.value = d.id;
+      opt.textContent = data.name || 'Untitled session';
+      linkToSelect.appendChild(opt);
+    });
+  } catch (err) { console.error(err); }
+}
+
+// One-time convenience: match "2ND YEAR (OUT)" → "2ND YEAR CON" style names
+// and link sessions that aren't paired yet. Idempotent — never overwrites an
+// existing pairing.
+async function autoLinkOutSessions() {
+  try {
+    const snap = await getDocs(query(collection(db, 'sessions'), limit(100)));
+    const all = [];
+    snap.forEach(d => all.push({ id: d.id, data: d.data() }));
+    const byName = new Map();
+    all.forEach(s => {
+      const n = String(s.data.name || '');
+      if (n && !byName.has(n)) byName.set(n, s.id);
+    });
+    const pairs = [];
+    for (const s of all) {
+      if (s.data.linkTo) continue;
+      const nm = String(s.data.name || '');
+      const m = nm.match(/^(.*?)\s*\(OUT\)$/i);
+      if (!m) continue;
+      const base = m[1].trim();
+      const target = byName.get(base + ' CON') || byName.get(base) || byName.get(nm.replace(/\(OUT\)/i, 'CON').trim());
+      if (target && target !== s.id) pairs.push({ outId: s.id, inId: target });
+    }
+    if (!pairs.length) return;
+    const batch = writeBatch(db);
+    pairs.forEach(p => batch.update(doc(db, 'sessions', p.outId), { linkTo: p.inId }));
+    await batch.commit();
+    showToast(`${pairs.length} time-out session(s) auto-linked to their time-in partner.`);
+    refreshLinkToOptions();
+  } catch (err) { console.warn('autoLinkOutSessions:', err); }
+}
+refreshLinkToOptions();
+autoLinkOutSessions();
+
 // ---------- QR display ----------
 function displaySessionQR(sessionId, name, active = true) {
   currentSessionId = sessionId;
@@ -236,6 +291,7 @@ function resetToNewSessionForm() {
   currentFields = defaultFields();
   renderFieldsEditor();
   editingSessionId = null;
+  if (linkToSelect) linkToSelect.value = '';
   document.getElementById('cancelEditBtn').style.display = 'none';
   document.getElementById('createSessionBtn').textContent = 'Create Session & Get QR';
 }
@@ -252,6 +308,8 @@ async function enterEditMode(id) {
     document.getElementById('eventName').value = data.name;
     currentFields = (data.fields && data.fields.length) ? JSON.parse(JSON.stringify(data.fields)) : defaultFields();
     renderFieldsEditor();
+    await refreshLinkToOptions(id);
+    if (linkToSelect) linkToSelect.value = data.linkTo || '';
     document.getElementById('createSessionBtn').textContent = 'Save Changes';
     document.getElementById('cancelEditBtn').style.display = 'inline-block';
     showToast(`Editing "${data.name}".`);
@@ -270,6 +328,7 @@ document.getElementById('createSessionBtn').addEventListener('click', async () =
   if (currentFields.some(f => !f.label || !f.label.trim())) { showToast('Give every field a label.', 'warn'); return; }
 
   const fields = finalizeFieldIds(currentFields);
+  const linkTo = linkToSelect ? linkToSelect.value : '';
   const wasEditing = !!editingSessionId;
   const btn = document.getElementById('createSessionBtn');
   btn.disabled = true;
@@ -278,16 +337,18 @@ document.getElementById('createSessionBtn').addEventListener('click', async () =
   try {
     if (wasEditing) {
       const sessionId = editingSessionId;
-      await updateDoc(doc(db, 'sessions', sessionId), { name, fields });
+      await updateDoc(doc(db, 'sessions', sessionId), { name, fields, linkTo: linkTo || null });
       showToast(`Session "${name}" updated.`);
       sfx.play('pop');
       displaySessionQR(sessionId, name, currentSessionId === sessionId ? currentSessionActive : true);
       resetToNewSessionForm();
+      refreshLinkToOptions();
     } else {
-      const docRef = await addDoc(collection(db, 'sessions'), { name, createdAt: serverTimestamp(), active: true, fields });
+      const docRef = await addDoc(collection(db, 'sessions'), { name, createdAt: serverTimestamp(), active: true, fields, linkTo: linkTo || null });
       showToast(`Session "${name}" created.`);
       displaySessionQR(docRef.id, name, true);
       resetToNewSessionForm();
+      refreshLinkToOptions();
       sfx.play('big');
       confettiAt(document.getElementById('badgeContainer'), { count: 140, power: 10 });
     }
@@ -532,7 +593,7 @@ function renderLiveTable() {
   for (const r of latestRegistrations) if (r.checkedIn) checkedIn++;
 
   if (!rows.length) {
-    const cols = liveFields.length + 2;
+    const cols = liveFields.length + 3;
     body.innerHTML = `<tr><td colspan="${cols}" class="text-center text-body-secondary py-4">No registrations match "${liveSearchTerm}".</td></tr>`;
     document.getElementById('exportCsvBtn').disabled = false;
     countUp(document.getElementById('registeredCount'), latestRegistrations.length);
@@ -544,8 +605,10 @@ function renderLiveTable() {
 
   body.innerHTML = rows.slice(0, MAX_RENDER_ROWS).map(r => {
     const time = r.checkedInAt ? r.checkedInAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
+    const outTime = r.checkedOutAt ? r.checkedOutAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
     const cells = liveFields.map(f => `<td>${escapeHtml(r[f.id] ?? '')}</td>`).join('');
-    return `<tr>${cells}<td>${r.checkedIn ? '<span class="status-pill in">Checked In</span>' : '<span class="status-pill out">Not Yet</span>'}</td><td>${time}</td></tr>`;
+    const timedOut = r.checkedOut ? `<span class="status-pill to">Timed Out</span>${outTime ? ' ' + escapeHtml(outTime) : ''}` : '—';
+    return `<tr>${cells}<td>${r.checkedIn ? '<span class="status-pill in">Checked In</span>' : '<span class="status-pill out">Not Yet</span>'}</td><td>${time}</td><td>${timedOut}</td></tr>`;
   }).join('');
 
   if (latestRegistrations.length > MAX_RENDER_ROWS) {
@@ -581,7 +644,7 @@ picker.addEventListener('change', async () => {
   } catch (err) { console.error(err); }
 
   document.getElementById('tableHead').innerHTML =
-    liveFields.map(f => `<th>${escapeHtml(f.label)}</th>`).join('') + '<th>Status</th><th>Checked In</th>';
+    liveFields.map(f => `<th>${escapeHtml(f.label)}</th>`).join('') + '<th>Status</th><th>Checked In</th><th>Time Out</th>';
 
   const q = query(collection(db, 'sessions', sessionId, 'registrations'), orderBy('registeredAt', 'desc'));
   unsubscribeLive = onSnapshot(q, (snap) => {
@@ -599,12 +662,13 @@ picker.addEventListener('change', async () => {
 
 document.getElementById('exportCsvBtn').addEventListener('click', () => {
   if (!latestRegistrations.length) { showToast('No data to export yet.', 'warn'); return; }
-  const headers = [...liveFields.map(f => f.label), 'Status', 'Registered At', 'Checked-In At'];
+  const headers = [...liveFields.map(f => f.label), 'Status', 'Registered At', 'Checked-In At', 'Checked-Out At'];
   const rows = latestRegistrations.map(r => [
     ...liveFields.map(f => r[f.id] ?? ''),
     r.checkedIn ? 'Checked In' : 'Not Yet',
     r.registeredAt ? r.registeredAt.toDate().toLocaleString() : '',
-    r.checkedInAt ? r.checkedInAt.toDate().toLocaleString() : ''
+    r.checkedInAt ? r.checkedInAt.toDate().toLocaleString() : '',
+    r.checkedOutAt ? r.checkedOutAt.toDate().toLocaleString() : ''
   ]);
   const csvEscape = (val) => {
     const s = String(val ?? '');

@@ -106,7 +106,9 @@ document.getElementById('regForm').addEventListener('submit', async (e) => {
         ...values,
         registeredAt: serverTimestamp(),
         checkedIn: false,
-        checkedInAt: null
+        checkedInAt: null,
+        checkedOut: false,
+        checkedOutAt: null
       });
       registrationId = docRef.id;
     }

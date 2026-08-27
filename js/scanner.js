@@ -63,24 +63,36 @@ function escapeHtml(str = '') {
 // admin renamed/removed it, fall back to the first non-metadata value.
 function getDisplayName(data) {
   if (data.name) return data.name;
-  const metaKeys = ['registeredAt', 'checkedIn', 'checkedInAt'];
+  const metaKeys = ['registeredAt', 'checkedIn', 'checkedInAt', 'checkedOut', 'checkedOutAt'];
   const key = Object.keys(data).find(k => !metaKeys.includes(k));
   return key ? data[key] : 'Student';
 }
 
 // ---------- session helpers (multi-device / multi-level aware) ----------
-const sessionNameCache = new Map();
-async function getSessionName(sessionId) {
-  if (sessionNameCache.has(sessionId)) return sessionNameCache.get(sessionId);
+// Rich cache: name + optional time-out pairing (linkTo = the time-in session
+// this one is the time-out gate for).
+const sessionCache = new Map();
+async function getSession(sessionId) {
+  if (!sessionId || sessionCache.has(sessionId)) return sessionCache.get(sessionId) || null;
+  let out = null;
   try {
     const snap = await getDoc(doc(db, 'sessions', sessionId));
-    const name = snap.exists() ? snap.data().name : 'Unknown session';
-    sessionNameCache.set(sessionId, name);
-    return name;
-  } catch (err) {
-    console.warn(err);
-    return 'Unknown session';
-  }
+    if (snap.exists()) {
+      const d = snap.data();
+      let partnerName = '';
+      if (d.linkTo) {
+        const pSnap = await getDoc(doc(db, 'sessions', d.linkTo));
+        partnerName = pSnap.exists() ? (pSnap.data().name || '') : '';
+      }
+      out = { id: sessionId, name: d.name || 'Unknown session', linkTo: d.linkTo || null, partnerName };
+    }
+  } catch (err) { console.warn(err); }
+  sessionCache.set(sessionId, out);
+  return out;
+}
+async function getSessionName(sessionId) {
+  const s = await getSession(sessionId);
+  return s ? s.name : 'Unknown session';
 }
 
 // Live per-session totals — ALWAYS visible for every active session, so a
@@ -97,8 +109,15 @@ async function refreshSessionChips(activeSessions) {
 
   const jobs = activeSessions.map(async (s) => {
     try {
-      const q = query(collection(db, 'sessions', s.id, 'registrations'), where('checkedIn', '==', true));
-      const total = (await getCountFromServer(q)).data().count;
+      const sess = await getSession(s.id);
+      let label;
+      if (sess && sess.linkTo) {
+        const q = query(collection(db, 'sessions', s.id, 'registrations'), where('checkedOut', '==', true));
+        label = (await getCountFromServer(q)).data().count + ' out';
+      } else {
+        const q = query(collection(db, 'sessions', s.id, 'registrations'), where('checkedIn', '==', true));
+        label = (await getCountFromServer(q)).data().count + ' ✓';
+      }
       let chip = chips.querySelector(`[data-session="${s.id}"]`);
       if (!chip) {
         chip = document.createElement('button');
@@ -111,7 +130,7 @@ async function refreshSessionChips(activeSessions) {
         });
         chips.appendChild(chip);
       }
-      chip.textContent = `${s.name}: ${total} ✓`;
+      chip.textContent = `${s.name}: ${label}`;
     } catch (err) {
       console.warn('[scanner] chip update failed:', err);
     }
@@ -173,6 +192,7 @@ async function checkIn(sessionId, registrationId) {
 // ---------- scan handling ----------
 let lastText = '';
 let lastTime = 0;
+let gateSessionId = ''; // camera gate: locked to one paired (time-out) session
 
 function onScanSuccess(decodedText) {
   const now = Date.now();
@@ -187,8 +207,177 @@ function onScanSuccess(decodedText) {
     buzz(120);
     return;
   }
-  const [sessionId, registrationId] = parts;
-  checkIn(sessionId, registrationId);
+  const [qrSessionId, registrationId] = parts;
+  routeScan(qrSessionId, registrationId);
+}
+
+// Chooses between normal time-in and the paired time-out flow.
+async function routeScan(qrSessionId, registrationId) {
+  // 1) A gate is locked on the scanner → honour it.
+  if (gateSessionId) {
+    const g = await getSession(gateSessionId);
+    if (g && g.linkTo) {
+      if (qrSessionId !== g.linkTo) {
+        flash(`${g.name} is the time-out gate for ${g.partnerName || 'that session'} — scan that year's QR.`, 'error');
+        sfx.play('error');
+        buzz(120);
+        return;
+      }
+      await doTimeOutFromCon(g, registrationId);
+      return;
+    }
+    if (g) { await checkIn(g.id, registrationId); return; }
+    flash('Unknown gate session.', 'error');
+    return;
+  }
+
+  // 2) Auto mode: a QR minted by a paired (time-out) session routes to time-out.
+  const qrSess = await getSession(qrSessionId);
+  if (qrSess && qrSess.linkTo) {
+    await doTimeOutFromOutReg(qrSess, registrationId);
+    return;
+  }
+
+  // 3) Normal time-in.
+  await checkIn(qrSessionId, registrationId);
+}
+
+// ---------- time-out flow (paired sessions) ----------
+// Rule: ONLY students who time-IN for the linked session can time out here.
+// The time-out record is created on the fly from their time-in record —
+// no duplicate manual registration needed.
+const OUT_META_KEYS = ['registeredAt', 'checkedIn', 'checkedInAt', 'checkedOut', 'checkedOutAt'];
+
+async function partnerRegByStudentId(partnerSessionId, studentId) {
+  if (!partnerSessionId || !studentId) return null;
+  const c = collection(db, 'sessions', partnerSessionId, 'registrations');
+  const q = query(c, where('studentId', '==', studentId), limit(1));
+  const snap = await getDocs(q);
+  return snap.empty ? null : snap.docs[0];
+}
+
+async function recordTimeOut(outSession, partnerDocRef) {
+  try {
+    const outcome = await runTransaction(db, async (tx) => {
+      const pSnap = await tx.get(partnerDocRef);
+      if (!pSnap.exists()) return { status: 'unknown' };
+
+      const pData = pSnap.data();
+      const name = getDisplayName(pData);
+      if (!pData.checkedIn) return { status: 'notIntimed', name };
+
+      const studentId = pData.studentId || '';
+      const outQ = query(collection(db, 'sessions', outSession.id, 'registrations'),
+                         where('studentId', '==', studentId), limit(1));
+      const outSnap = await tx.get(outQ);
+
+      if (!outSnap.empty) {
+        const od = outSnap.docs[0].data();
+        if (od.checkedOut) {
+          const t = od.checkedOutAt ? od.checkedOutAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+          return { status: 'already', name, time: t || 'already' };
+        }
+        tx.update(outSnap.docs[0].ref, { checkedOut: true, checkedOutAt: serverTimestamp() });
+        return { status: 'ok', name };
+      }
+
+      // Copy the student's identity fields over, minus check-in metadata.
+      const identity = {};
+      for (const k of Object.keys(pData)) {
+        if (!OUT_META_KEYS.includes(k)) identity[k] = pData[k];
+      }
+      // Deterministic ID (student ID) so two gates can't create duplicates.
+      const docId = (String(studentId).replace(/[^A-Za-z0-9._-]/g, '-')) || ('nout_' + Date.now());
+      tx.set(doc(db, 'sessions', outSession.id, 'registrations', docId), {
+        ...identity,
+        checkedIn: false, checkedInAt: null,
+        checkedOut: true, checkedOutAt: serverTimestamp(),
+        registeredAt: serverTimestamp()
+      });
+      return { status: 'ok', name };
+    });
+
+    if (!outcome || outcome.status === 'unknown') {
+      flash(`Unknown code — not found in ${outSession.partnerName || 'the paired session'}.`, 'error');
+      sfx.play('error'); buzz(120);
+      return;
+    }
+    if (outcome.status === 'notIntimed') {
+      flash(`${outcome.name} hasn't timed in for ${outSession.partnerName || 'the paired session'} — cannot time out.`, 'error');
+      sfx.play('error'); buzz(120);
+      return;
+    }
+    if (outcome.status === 'already') {
+      flash(`${outcome.name} already timed out${outcome.time && outcome.time !== 'already' ? ' at ' + outcome.time : ''} · ${outSession.name}`, 'warn');
+      sfx.play('warn'); buzz(80);
+      return;
+    }
+
+    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    flash(`✓ ${outcome.name} timed out · ${outSession.name}`, 'success');
+    addRecent(`[${outSession.name}] ${outcome.name}`, now);
+    sfx.play('success');
+    buzz([40, 60, 40]);
+    confettiAt(document.getElementById('scanFlash'), { count: 110, power: 9 });
+    refreshSessionChips([{ id: outSession.id, name: outSession.name }]);
+  } catch (err) {
+    console.error(err);
+    flash('Connection problem — could not record time-out.', 'error');
+    sfx.play('error');
+    buzz(120);
+  }
+}
+
+// Gate scan: the QR was minted by the linked time-in session, so its
+// registration ID IS the partner record.
+async function doTimeOutFromCon(outSession, conRegId) {
+  const partnerRef = doc(db, 'sessions', outSession.linkTo, 'registrations', conRegId);
+  await recordTimeOut(outSession, partnerRef);
+}
+
+// Auto mode with an OUT-session QR: resolve the partner record by studentId.
+async function doTimeOutFromOutReg(outSession, outRegId) {
+  try {
+    const outRef = doc(db, 'sessions', outSession.id, 'registrations', outRegId);
+    const outSnap = await getDoc(outRef);
+    if (!outSnap.exists()) { flash('Unknown code.', 'error'); return; }
+    const pReg = await partnerRegByStudentId(outSession.linkTo, outSnap.data().studentId || '');
+    if (!pReg) {
+      flash(`No time-in found for ${getDisplayName(outSnap.data())} in ${outSession.partnerName || 'the paired session'}.`, 'error');
+      sfx.play('error'); buzz(120);
+      return;
+    }
+    await recordTimeOut(outSession, pReg.ref);
+  } catch (err) {
+    console.error(err);
+    flash('Connection problem — could not record time-out.', 'error');
+  }
+}
+
+// Manual entry for a paired (time-out) session.
+async function doTimeOutManual(outSession, term) {
+  const found = await findRegistrationByStudentId(outSession.id, term);
+  if (found && found.picker) { showPicker(found.picker, outSession.id); return; }
+
+  if (found && found.doc) {
+    const pReg = await partnerRegByStudentId(outSession.linkTo, found.doc.data().studentId || '');
+    if (!pReg) {
+      flash(`No time-in found for ${getDisplayName(found.doc.data())} in ${outSession.partnerName || 'the paired session'}.`, 'error');
+      sfx.play('error'); buzz(120);
+      return;
+    }
+    await recordTimeOut(outSession, pReg.ref);
+    return;
+  }
+
+  // No OUT record yet — look the student up by ID in the time-in session.
+  const pReg = await partnerRegByStudentId(outSession.linkTo, term);
+  if (!pReg) {
+    flash(`No time-in record for "${term}" in ${outSession.partnerName || 'the paired session'} — they must time in first.`, 'error');
+    sfx.play('error'); buzz(120);
+    return;
+  }
+  await recordTimeOut(outSession, pReg.ref);
 }
 
 // ---------- camera scanning ----------
@@ -417,7 +606,14 @@ function showPicker(candidates, sessionId) {
       const idx = Number(btn.dataset.i);
       const match = candidates[idx];
       if (match) {
-        await checkIn(sessionId, match.id);
+        const sSnap = await getSession(sessionId);
+        if (sSnap && sSnap.linkTo) {
+          const pReg = await partnerRegByStudentId(sSnap.linkTo, match.data().studentId || '');
+          if (pReg) await recordTimeOut(sSnap, pReg.ref);
+          else flash(`No time-in found for ${getDisplayName(match.data())} in ${sSnap.partnerName || 'the paired session'}.`, 'error');
+        } else {
+          await checkIn(sessionId, match.id);
+        }
         document.getElementById('manualStudentId').value = '';
       }
     });
@@ -430,6 +626,14 @@ function rebindScannerUI() {
   sessionHint = document.getElementById('sessionHint');
   setupCameraSwitchButton();
 
+  const gateSelect = document.getElementById('gateSelect');
+  if (gateSelect) {
+    gateSelect.addEventListener('change', () => {
+      gateSessionId = gateSelect.value;
+      updateGateHint();
+    });
+  }
+
   document.getElementById('manualBtn').addEventListener('click', async () => {
     const sessionId = manualSession.value;
     const term = document.getElementById('manualStudentId').value.trim();
@@ -439,6 +643,13 @@ function rebindScannerUI() {
     if (!term) { flash('Enter a student ID or name.', 'error'); return; }
 
     try {
+      const session = await getSession(sessionId);
+      // Paired (time-out) session → enforce "must have timed in first".
+      if (session && session.linkTo) {
+        await doTimeOutManual(session, term);
+        document.getElementById('manualStudentId').value = '';
+        return;
+      }
       const found = await findRegistrationByStudentId(sessionId, term);
       if (!found) {
         flash('No registration found for that ID or name.', 'error');
@@ -452,6 +663,20 @@ function rebindScannerUI() {
       flash('Connection problem — could not look up that ID.', 'error');
     }
   });
+}
+
+async function updateGateHint() {
+  const hint = document.getElementById('gateHint');
+  if (!hint) return;
+  if (!gateSessionId) { hint.style.display = 'none'; return; }
+  const g = await getSession(gateSessionId);
+  hint.style.display = 'block';
+  if (g && g.linkTo) {
+    hint.textContent = `Time-out gate: scans check students OUT of ${g.name}, but only if they timed in for ${g.partnerName || 'the paired session'} first.`;
+  } else {
+    hint.textContent = '';
+    hint.style.display = 'none';
+  }
 }
 
 // Live-sync the manual check-in dropdown with ALL ACTIVE sessions.
@@ -499,10 +724,15 @@ function watchActiveSessions() {
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
       </button>
         </div>
+        <div class="gate-bar mb-2" id="gateBar" style="display:none;">
+          <label class="form-label small mb-1" for="gateSelect">Scanner mode</label>
+          <select class="form-select" id="gateSelect"></select>
+          <p id="gateHint" class="small" style="display:none; margin:6px 0 0;"></p>
+        </div>
         <div id="reader"></div>
         <div id="scanFlash" class="scan-result-flash" style="display:none;"></div>
         <div class="mt-4">
-          <h3 class="session-tag mb-2" style="margin-bottom:8px;">Recent Check-ins</h3>
+          <h3 class="session-tag mb-2" style="margin-bottom:8px;">Recent Scans</h3>
           <div id="recentList"><p class="small text-body-secondary">No scans yet.</p></div>
         </div>
         <div class="manual-panel">
@@ -528,6 +758,27 @@ function watchActiveSessions() {
     manualSession.innerHTML = '<option value="">— Select a session —</option>' +
       active.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}</option>`).join('');
     if (current && active.some(s => s.id === current)) manualSession.value = current;
+
+    // Camera gate: only paired (time-out) sessions appear as gate options.
+    const gateEl = document.getElementById('gateSelect');
+    const gateBarEl = document.getElementById('gateBar');
+    if (gateEl) {
+      const prevGate = gateSessionId;
+      let gateOpts = '<option value="">Normal mode — decode from QR</option>';
+      let outCount = 0;
+      snap.forEach(d => {
+        const data = d.data();
+        if (data.active === false || data.archived === true) return;
+        if (!data.linkTo) return;
+        outCount++;
+        gateOpts += `<option value="${escapeHtml(d.id)}">TIME-OUT · ${escapeHtml(data.name || 'Untitled')}</option>`;
+      });
+      gateEl.innerHTML = gateOpts;
+      if (gateBarEl) gateBarEl.style.display = outCount ? 'block' : 'none';
+      if (prevGate && gateEl.querySelector(`option[value="${prevGate}"]`)) gateEl.value = prevGate;
+      else gateSessionId = '';
+      updateGateHint();
+    }
 
     // Refresh the live per-session totals chips (always visible for ALL sessions).
     const chipsWrap = document.getElementById('sessionChips');
