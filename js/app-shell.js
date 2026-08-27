@@ -10,9 +10,11 @@
    • Ambient particle field behind the content
    • countUp() number animation for live stats
    • buzz() haptic feedback helper
+   • confirmDialog() custom confirm modal (works in iOS standalone PWA)
+   • Build badge (bottom corner) — verifies which build a device runs
 
    Usage in page modules:
-     import { sfx, confettiBurstAtElement, countUp, buzz } from './app-shell.js';
+     import { sfx, confettiBurstAtElement, countUp, buzz, confirmDialog } from './app-shell.js';
    ===================================================================== */
 
 const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -407,10 +409,10 @@ export function countUp(el, target, duration = 600) {
 
 /* ---------------------------------------------------------------------
    Build badge — tiny version marker fixed to the bottom corner.
-   Lets you verify WHICH build a device is actually running (handy when
-   a cached service worker is serving an older app shell).
+   Shows the build AND the Firebase project the app talks to, so you can
+   instantly verify a device is current and on the right database.
 --------------------------------------------------------------------- */
-const APP_BUILD = 'v2.0.1';
+const APP_BUILD = 'v2.0.2';
 (function buildBadge() {
   try {
     const badge = document.createElement('div');

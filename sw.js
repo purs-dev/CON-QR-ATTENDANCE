@@ -8,10 +8,11 @@
    • Navigations: network-first, falling back to the cached page.
    • Static assets (same-origin + known CDNs): stale-while-revalidate.
    • Firestore / Firebase backend traffic: NEVER cached — always live.
+
    Bump VERSION whenever you ship changes to force a cache refresh.
    ===================================================================== */
 
-const VERSION = 'v2.0.1';
+const VERSION = 'v2.0.2';
 const CACHE_NAME = `con-attendance-${VERSION}`;
 
 const PRECACHE_URLS = [
@@ -31,12 +32,14 @@ const PRECACHE_URLS = [
   './images/icon-192.png',
   './images/icon-512.png',
   './images/maskable-512.png',
+
   /* CDN libraries */
   'https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css',
   'https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js',
   'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js',
   'https://fonts.googleapis.com/css2?family=Sora:wght@400;700;800&family=Inter:wght@400;600;900&display=swap',
+
   /* Firebase SDK modules */
   'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js',
   'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js'
@@ -88,7 +91,6 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
-
   const url = new URL(request.url);
 
   // Live backend data (Firestore etc.) — always the network, never the SW.
@@ -149,5 +151,7 @@ async function staleWhileRevalidate(request) {
 
 function putInCache(request, response) {
   if (!response || !response.url || !response.url.startsWith('http')) return;
-  caches.open(CACHE_NAME).then(cache => cache.put(request, response)).catch(() => {});
+  caches.open(CACHE_NAME).then(cache =>
+    cache.put(request, response)
+  ).catch(() => {});
 }

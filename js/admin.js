@@ -448,11 +448,10 @@ function loadSessionOptions() {
     picker.innerHTML = '<option value="">— Select a session —</option>';
     snap.forEach(d => {
       const data = d.data();
-      if (data.active === false) return;
       if (data.archived === true) return;
       const opt = document.createElement('option');
       opt.value = d.id;
-      opt.textContent = data.name || 'Untitled session';
+      opt.textContent = (data.name || 'Untitled session') + (data.active === false ? ' (Closed)' : '');
       picker.appendChild(opt);
     });
     if (current && picker.querySelector(`option[value="${current}"]`)) picker.value = current;
@@ -572,6 +571,9 @@ picker.addEventListener('change', async () => {
   if (liveSearchClear) { liveSearchClear.style.display = 'none'; }
 
   liveSessionName = picker.options[picker.selectedIndex].text;
+  if (/\(Closed\)/.test(liveSessionName)) {
+    showToast('This session is Closed — registrations are paused. Reopen it from the Setup tab to accept registrations again.', 'warn');
+  }
   liveFields = defaultFields();
   try {
     const snap = await getDoc(doc(db, 'sessions', sessionId));
