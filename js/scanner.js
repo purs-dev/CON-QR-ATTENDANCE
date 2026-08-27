@@ -304,6 +304,45 @@ async function startCamera() {
 let manualSession = document.getElementById('manualSession');
 let sessionHint = document.getElementById('sessionHint');
 
+// Robust lookup: search the session's REAL fields for the entered ID.
+// The old version only matched a field literally named "studentId", so any
+// session whose fields were customized (renamed Student ID → ID / No., etc.)
+// would report "No registration found" even though the student was registered.
+async function findRegistrationByStudentId(sessionId, studentId) {
+  const regCollection = collection(db, 'sessions', sessionId, 'registrations');
+
+  // 1st pass: the default field id — fast, avoids an extra doc read.
+  const fastSnap = await getDocs(query(regCollection, where('studentId', '==', studentId), limit(1)));
+  if (!fastSnap.empty) return fastSnap.docs[0];
+
+  // 2nd pass: learn the session's configured fields.
+  const sSnap = await getDoc(doc(db, 'sessions', sessionId));
+  const fields = (sSnap.exists() && sSnap.data().fields) ? sSnap.data().fields : [];
+
+  // Order candidates sensibly: ids/labels that scream "student identifier"
+  // first, then every remaining field as a last-resort net.
+  const scored = [];
+  fields.forEach(f => {
+    const id = String(f.id || '');
+    const label = String(f.label || '');
+    let score = 0;
+    if (id === 'studentId') score += 4;
+    if (/student/i.test(id) || /student/i.test(label)) score += 3;
+    if (/\bid\b|id number|student no|id no|student number/i.test(`${id} ${label}`)) score += 2;
+    if (/^[a-z0-9]+$/i.test(id)) score += 1;
+    scored.push({ f, score });
+  });
+  scored.sort((a, b) => b.score - a.score);
+  const candidateIds = scored.map(x => x.f.id);
+
+  for (const fieldId of candidateIds) {
+    if (!fieldId) continue;
+    const snap = await getDocs(query(regCollection, where(fieldId, '==', studentId), limit(1)));
+    if (!snap.empty) return snap.docs[0];
+  }
+  return null;
+}
+
 function rebindScannerUI() {
   readerEl = document.getElementById('reader');
   manualSession = document.getElementById('manualSession');
@@ -316,14 +355,12 @@ function rebindScannerUI() {
     if (!studentId) { flash('Enter a student ID.', 'error'); return; }
 
     try {
-      const regCollection = collection(db, 'sessions', sessionId, 'registrations');
-      const q = query(regCollection, where('studentId', '==', studentId), limit(1));
-      const snap = await getDocs(q);
-      if (snap.empty) {
+      const regDoc = await findRegistrationByStudentId(sessionId, studentId);
+      if (!regDoc) {
         flash('No registration found for that ID in this session.', 'error');
         return;
       }
-      await checkIn(sessionId, snap.docs[0].id);
+      await checkIn(sessionId, regDoc.id);
       document.getElementById('manualStudentId').value = '';
     } catch (err) {
       console.error(err);
