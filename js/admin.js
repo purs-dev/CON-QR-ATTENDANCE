@@ -169,8 +169,8 @@ function displaySessionQR(sessionId, name, active = true) {
   qrDiv.innerHTML = '';
   const link = registrationLink(sessionId);
   new QRCode(qrDiv, {
-    text: link, width: 240, height: 240,
-    colorDark: '#0B3D2E', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.H
+    text: link, width: 260, height: 260,
+    colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.H
   });
   qrDiv.classList.add('pop');
 
@@ -190,9 +190,17 @@ function displaySessionQR(sessionId, name, active = true) {
   document.getElementById('downloadBtn').onclick = () => {
     const canvas = qrDiv.querySelector('canvas');
     if (!canvas) return;
+    // Re-draw at high resolution with a solid white margin (quiet zone) so
+    // scanners read it reliably even when zoomed out or on dark-mode phones.
+    const size = 600, pad = 48;
+    const c = document.createElement('canvas');
+    c.width = size; c.height = size;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, size, size);
+    ctx.drawImage(canvas, pad, pad, size - pad * 2, size - pad * 2);
     const a = document.createElement('a');
     a.download = `${name.replace(/\s+/g, '_')}_registration_qr.png`;
-    a.href = canvas.toDataURL('image/png');
+    a.href = c.toDataURL('image/png');
     a.click();
   };
   document.getElementById('copyLinkBtn').onclick = () => {

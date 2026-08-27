@@ -344,7 +344,6 @@ function watchActiveSessions() {
   if (sessionsUnsubscribe) sessionsUnsubscribe();
   const q = query(collection(db, 'sessions'), orderBy('createdAt', 'desc'), limit(50));
   sessionsUnsubscribe = onSnapshot(q, (snap) => {
-    const current = manualSession.value;
     const active = [];
     snap.forEach(d => {
       const data = d.data();
@@ -352,10 +351,6 @@ function watchActiveSessions() {
       active.push({ id: d.id, name: data.name || 'Untitled session' });
     });
     hasActiveSessions = active.length > 0;
-
-    manualSession.innerHTML = '<option value="">— Select a session —</option>' +
-      active.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}</option>`).join('');
-    if (current && active.some(s => s.id === current)) manualSession.value = current;
 
     const scanFrame = document.querySelector('.scan-frame');
 
@@ -396,6 +391,13 @@ function watchActiveSessions() {
       rebindScannerUI();
       startCamera();
     }
+
+    // ALWAYS (re)fill the dropdown with the current active list —
+    // must run AFTER any rebuild so the fresh <select> actually gets options.
+    const current = manualSession.value;
+    manualSession.innerHTML = '<option value="">— Select a session —</option>' +
+      active.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}</option>`).join('');
+    if (current && active.some(s => s.id === current)) manualSession.value = current;
   }, (err) => {
     console.error(err);
     showToast('Could not load sessions — check connection. Retrying…', 'error');

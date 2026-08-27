@@ -133,8 +133,8 @@ function showQr(registrationId, name) {
   qrDiv.innerHTML = '';
   const payload = `${sessionId}|${registrationId}`;
   new QRCode(qrDiv, {
-    text: payload, width: 230, height: 230,
-    colorDark: '#0B3D2E', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.H
+    text: payload, width: 260, height: 260,
+    colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.H
   });
   qrDiv.classList.add('pop');
 
@@ -146,9 +146,17 @@ function showQr(registrationId, name) {
   document.getElementById('downloadQrBtn').onclick = () => {
     const canvas = qrDiv.querySelector('canvas');
     if (!canvas) return;
+    // High-res PNG with a solid white quiet-zone margin — reliably scannable
+    // by any document scanner regardless of the phone's dark-mode setting.
+    const size = 600, pad = 48;
+    const c = document.createElement('canvas');
+    c.width = size; c.height = size;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, size, size);
+    ctx.drawImage(canvas, pad, pad, size - pad * 2, size - pad * 2);
     const a = document.createElement('a');
     a.download = `${name.replace(/\s+/g, '_')}_attendance_qr.png`;
-    a.href = canvas.toDataURL('image/png');
+    a.href = c.toDataURL('image/png');
     a.click();
     sfx.play('pop');
   };

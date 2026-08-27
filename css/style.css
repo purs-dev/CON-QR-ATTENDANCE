@@ -7,6 +7,7 @@
    ===================================================================== */
 
 :root{
+  color-scheme: light;              /* prevents Android/Chrome auto dark-mode from inverting QR codes */
   --black:      #0A1F18;
   --forest:     #0B3D2E;
   --pine:       #154D3C;
@@ -175,8 +176,11 @@ input, textarea{ cursor:text; }
 .badge-icon{ width:34px; height:34px; object-fit:contain; }
 .badge-title{ font-weight:800; font-size:11px; letter-spacing:.16em; color:var(--pine); }
 .display-event{ font-size:19px; color:var(--forest); margin-bottom:22px; text-transform:uppercase; min-height:24px; word-break:break-word; }
-.qr-target{ display:flex; justify-content:center; }
-.qr-target canvas, .qr-target img{ margin:0 auto; border-radius:8px; filter:contrast(1.05); }
+.qr-target{ display:flex; justify-content:center; color-scheme:light; }
+.qr-target canvas, .qr-target img{
+  margin:0 auto; border-radius:8px; background:#ffffff; padding:10px;
+  filter:none; color-scheme:light; forced-color-adjust:none;
+}
 @keyframes qrPop{ from{ opacity:0; transform:scale(.82);} to{ opacity:1; transform:scale(1);} }
 .qr-target.pop{ animation:qrPop .4s cubic-bezier(.34,1.56,.64,1); }
 .badge-footer{ margin-top:22px; }
