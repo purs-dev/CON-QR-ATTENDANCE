@@ -11,7 +11,7 @@
    Bump VERSION whenever you ship changes to force a cache refresh.
    ===================================================================== */
 
-const VERSION = 'v1.9.5';
+const VERSION = 'v2.0.0';
 const CACHE_NAME = `con-attendance-${VERSION}`;
 
 const PRECACHE_URLS = [
@@ -109,12 +109,32 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Everything else from our origin or trusted CDNs: stale-while-revalidate.
-  if (url.origin === self.location.origin ||
-      CDN_HOSTS.some(h => url.hostname === h || url.hostname.endsWith('.' + h))) {
+  // Everything else from our origin: network-first so the installed app
+  // ALWAYS uses the latest code from the web (falls back to cache offline).
+  if (url.origin === self.location.origin) {
+    event.respondWith(networkFirst(request));
+    return;
+  }
+
+  // Trusted CDNs (bootstrap, qrcodejs, html5-qrcode, fonts): stale-while-revalidate.
+  if (CDN_HOSTS.some(h => url.hostname === h || url.hostname.endsWith('.' + h))) {
     event.respondWith(staleWhileRevalidate(request));
   }
 });
+
+async function networkFirst(request) {
+  try {
+    const fresh = await fetch(request);
+    if (fresh && fresh.ok) {
+      putInCache(request, fresh.clone());
+      return fresh;
+    }
+    const cached = await caches.match(request);
+    return cached || fresh;
+  } catch (err) {
+    return caches.match(request) || Response.error();
+  }
+}
 
 async function staleWhileRevalidate(request) {
   const cached = await caches.match(request);

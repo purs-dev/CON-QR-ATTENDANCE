@@ -540,6 +540,13 @@ a, button, .nav-link, .history-item, .form-select{ transition: color .18s, backg
 }
 .btn-confirm-danger:hover{ background:#a54022; border-color:#a54022; color:#fff; }
 
+/* Reset the responsive search-toolbar rule now that it's a styled bar. */
+@media (max-width:575px){
+  .live-search-bar{ flex-wrap:wrap; }
+  .live-search-bar .form-control{ flex:1 1 100%; }
+  .live-search-bar #liveSearchClear{ margin-left:auto; }
+}
+
 /* =====================================================================
    RESPONSIVE / APP-SYNC POLISH — mobile & desktop
    ===================================================================== */
@@ -570,9 +577,9 @@ a, button, .nav-link, .history-item, .form-select{ transition: color .18s, backg
   .history-item .hactions{ justify-content:flex-start; flex-wrap:wrap; }
 
   /* Live feed: search bar + clear go on their own rows; table fits screen. */
-  .table-toolbar{ flex-wrap:wrap; }
-  .table-toolbar .form-control{ flex:1 1 100%; }
-  .table-toolbar #liveSearchClear{ margin-left:auto; }
+  .live-search-bar{ flex-wrap:wrap; }
+  .live-search-bar .form-control{ flex:1 1 100%; }
+  .live-search-bar #liveSearchClear{ margin-left:auto; }
 
   /* Heavy offset shadows trim down on small screens. */
   .table-frame{ box-shadow:6px 6px 0px var(--forest); height:min(520px, 60vh); }

@@ -410,7 +410,7 @@ export function countUp(el, target, duration = 600) {
    Lets you verify WHICH build a device is actually running (handy when
    a cached service worker is serving an older app shell).
 --------------------------------------------------------------------- */
-const APP_BUILD = 'v1.9.5';
+const APP_BUILD = 'v2.0.0';
 (function buildBadge() {
   try {
     const badge = document.createElement('div');
