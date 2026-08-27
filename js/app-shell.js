@@ -391,6 +391,21 @@ export function countUp(el, target, duration = 600) {
 }
 
 /* ---------------------------------------------------------------------
+   Build badge — tiny version marker fixed to the bottom corner.
+   Lets you verify WHICH build a device is actually running (handy when
+   a cached service worker is serving an older app shell).
+--------------------------------------------------------------------- */
+const APP_BUILD = 'v1.9.3';
+(function buildBadge() {
+  try {
+    const badge = document.createElement('div');
+    badge.id = 'buildBadge';
+    badge.textContent = 'build ' + APP_BUILD;
+    document.body.appendChild(badge);
+  } catch { /* noop */ }
+})();
+
+/* ---------------------------------------------------------------------
    confirmDialog — Promise-based custom confirm modal.
    Native confirm()/alert() are silently blocked in iOS standalone PWAs,
    which is why buttons like "Archive" appeared to do nothing there.

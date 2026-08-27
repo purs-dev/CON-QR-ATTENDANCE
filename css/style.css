@@ -445,6 +445,13 @@ a, button, .nav-link, .history-item, .form-select{ transition: color .18s, backg
 .card:hover{ transform:translateY(-3px); box-shadow:10px 12px 0px var(--gold); }
 
 /* ---------- respect users who prefer reduced motion ---------- */
+/* ---------- build version badge (bottom corner) ---------- */
+#buildBadge{
+  position:fixed; right:10px; bottom:8px; z-index:2900; pointer-events:none;
+  font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:10px;
+  letter-spacing:.05em; color:rgba(11,23,16,.32); background:rgba(255,255,255,.55);
+  padding:2px 7px; border-radius:10px; border:1px solid rgba(11,23,16,.08);
+}
 @media (prefers-reduced-motion:reduce){
   #fx-particles, #fx-confetti{ display:none; }
   #reader::after{ display:none; }
