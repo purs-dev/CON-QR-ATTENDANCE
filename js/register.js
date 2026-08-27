@@ -2,7 +2,7 @@ import { db } from "./firebase-config.js";
 import {
   doc, getDoc, collection, addDoc, query, where, getDocs, limit, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { sfx, confettiBurstAtElement as confettiAt, buzz } from "./app-shell.js";
+import { sfx, confettiBurstAtElement as confettiAt, buzz, confirmDialog } from "./app-shell.js";
 
 const params = new URLSearchParams(location.search);
 const sessionId = params.get('session');
@@ -112,22 +112,34 @@ document.getElementById('regForm').addEventListener('submit', async (e) => {
     }
 
     const displayName = values.name || values[sessionFields[0]?.id] || Object.values(values)[0] || 'Registered';
-    showQr(registrationId, displayName);
+    // Use the real display name from any field, whatever it's labeled.
+    let displayId = values.studentId || '';
+    if (!displayId) {
+      for (const f of sessionFields) {
+        if (/\bstudent|id|number|no\.?/i.test(String(f.label || '')) || /\bstudent|id\b/i.test(String(f.id || ''))) {
+          if (values[f.id]) { displayId = values[f.id]; break; }
+        }
+      }
+    }
+    showQr(registrationId, displayName, displayId);
   } catch (err) {
     console.error(err);
     sfx.play('error');
-    alert('Something went wrong submitting your registration. Please try again.');
+    confirmDialog('Something went wrong submitting your registration.<br><small>Please check your connection and try again.</small>', { okText: 'OK' });
   } finally {
     btn.disabled = false; btn.textContent = 'Get My QR Code';
   }
 });
 
-function showQr(registrationId, name) {
+function showQr(registrationId, name, studentId = '') {
   formState.style.display = 'none';
   qrState.style.display = 'block';
 
   document.getElementById('qrSessionName').textContent = sessionName;
   document.getElementById('qrStudentName').textContent = name;
+  const idEl = document.getElementById('qrStudentId');
+  if (studentId) { idEl.textContent = `ID: ${studentId}`; idEl.style.display = 'block'; }
+  else idEl.style.display = 'none';
 
   const qrDiv = document.getElementById('qrcode');
   qrDiv.innerHTML = '';
@@ -148,14 +160,26 @@ function showQr(registrationId, name) {
     if (!canvas) return;
     // High-res PNG with a solid white quiet-zone margin — reliably scannable
     // by any document scanner regardless of the phone's dark-mode setting.
-    const size = 600, pad = 48;
+    const size = 620, pad = 48;
     const c = document.createElement('canvas');
     c.width = size; c.height = size;
     const ctx = c.getContext('2d');
     ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, size, size);
-    ctx.drawImage(canvas, pad, pad, size - pad * 2, size - pad * 2);
+    const qrSize = size - pad * 2 - 56; // leave room for the text below
+    ctx.drawImage(canvas, pad, pad, qrSize, qrSize);
+    if (name) {
+      ctx.fillStyle = '#0B1710';
+      ctx.textAlign = 'center';
+      ctx.font = '700 26px Inter, Arial, sans-serif';
+      ctx.fillText(name, size / 2, pad + qrSize + 30, size - pad * 2);
+    }
+    if (studentId) {
+      ctx.fillStyle = '#5a6b63';
+      ctx.font = '600 20px Inter, Arial, sans-serif';
+      ctx.fillText(`ID: ${studentId}`, size / 2, pad + qrSize + 62, size - pad * 2);
+    }
     const a = document.createElement('a');
-    a.download = `${name.replace(/\s+/g, '_')}_attendance_qr.png`;
+    a.download = `${(name || 'student').replace(/\s+/g, '_')}_attendance_qr.png`;
     a.href = c.toDataURL('image/png');
     a.click();
     sfx.play('pop');

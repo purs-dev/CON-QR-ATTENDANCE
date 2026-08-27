@@ -189,6 +189,7 @@ input, textarea{ cursor:text; }
 .checker-line{ height:8px; margin-bottom:12px; border-radius:2px; background:linear-gradient(90deg,var(--pine),var(--gold)); }
 .badge-footer p{ font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-soft); }
 .student-name-display{ font-size:15px; font-weight:700; color:var(--ink); margin-top:4px; }
+.student-id-display{ font-size:12px; font-weight:600; letter-spacing:.08em; color:var(--ink-soft); margin:2px 0 0; text-transform:uppercase; }
 
 /* ---------- Status pills ---------- */
 .status-pill{
@@ -248,10 +249,35 @@ tr.row-new td{ animation:rowFlash 2.2s ease-out; }
 /* per-session live totals on the scanner (same numbers on every device) */
 .session-chips{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
 .session-chip{
-  display:inline-flex; align-items:center; padding:6px 13px; border-radius:20px;
-  background:var(--forest); color:var(--cream); font-size:11px; font-weight:800;
+  display:inline-flex; align-items:center; padding:7px 14px; border-radius:20px;
+  background:var(--forest); color:var(--cream); font-size:11.5px; font-weight:800;
   letter-spacing:.04em; animation:qrPop .3s cubic-bezier(.34,1.56,.64,1);
+  border:1px solid var(--pine-light); cursor:pointer; transition:transform .15s var(--ease), box-shadow .15s var(--ease);
 }
+.session-chip:hover{ transform:translateY(-2px); box-shadow:0 5px 0 0 var(--gold); }
+
+/* camera switch button on the scanner */
+.scan-toolbar{ justify-content:flex-end; }
+.switch-cam-btn{
+  width:44px; height:44px; border-radius:12px !important; font-size:19px; line-height:1;
+  padding:0 !important; display:inline-flex; align-items:center; justify-content:center;
+  background:var(--forest) !important; border:1.5px solid var(--pine-light) !important; color:var(--cream) !important;
+}
+.switch-cam-btn:hover{ transform:translateY(-2px); box-shadow:0 5px 0 0 var(--gold); }
+.switch-cam-btn:disabled{ opacity:.45; }
+.switch-cam-btn:active{ transform:scale(.94); }
+
+/* name/ID search result picker on the scanner */
+.search-results{ background:rgba(11,61,46,0.06); border-radius:10px; padding:12px; }
+.pick-head{ font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.1em; color:var(--pine); margin-bottom:10px; }
+.pick-row{
+  display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%;
+  background:var(--paper); border:1.5px solid var(--line-soft); border-radius:8px;
+  padding:10px 14px; margin-bottom:6px; font-size:13.5px; color:var(--ink); text-align:left;
+}
+.pick-row b{ color:var(--forest); }
+.pick-row span{ font-size:11.5px; color:var(--ink-soft); letter-spacing:.05em; }
+.pick-row:hover{ border-color:var(--gold); background:rgba(212,167,61,0.08); }
 
 /* ---------- Error / empty states ---------- */
 .error-state{ text-align:center; padding:70px 20px; }
@@ -481,3 +507,26 @@ a, button, .nav-link, .history-item, .form-select{ transition: color .18s, backg
   font-size:11.5px; color:var(--ink-soft); line-height:1.6;
   border-top:1.5px solid var(--line-soft); padding-top:12px; margin:0;
 }
+
+/* ---------- custom confirm dialog (works in iOS standalone PWA) ---------- */
+.confirm-overlay{
+  position:fixed; inset:0; z-index:2900;
+  background:rgba(10,31,24,.72); backdrop-filter:blur(5px);
+  display:flex; align-items:center; justify-content:center; padding:20px;
+  animation:fadeIn .25s var(--ease);
+}
+.confirm-card{
+  background:var(--cream); color:var(--ink); max-width:380px; width:100%;
+  border-radius:16px; padding:28px 24px; box-shadow:0 30px 70px rgba(0,0,0,.5);
+  animation:sheetUp .35s var(--ease);
+}
+.confirm-msg{
+  font-size:15px; font-weight:600; line-height:1.6; color:var(--ink); margin:0 0 22px;
+}
+.confirm-msg small{ font-weight:400; display:block; margin-top:8px; color:var(--ink-soft); }
+.confirm-actions{ display:flex; gap:10px; justify-content:flex-end; }
+.confirm-actions .btn{ font-size:11px; padding:12px 16px; }
+.btn-confirm-danger{
+  background:var(--danger); border:1px solid var(--danger); color:var(--cream);
+}
+.btn-confirm-danger:hover{ background:#a54022; border-color:#a54022; color:#fff; }

@@ -3,7 +3,7 @@ import {
   collection, addDoc, doc, updateDoc, deleteDoc, getDoc, getDocs, writeBatch,
   onSnapshot, query, where, orderBy, limit, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { sfx, confettiBurstAtElement as confettiAt, countUp } from "./app-shell.js";
+import { sfx, confettiBurstAtElement as confettiAt, countUp, confirmDialog } from "./app-shell.js";
 
 // ---------- cursor ring ----------
 const cursor = document.querySelector('.cursor-ring');
@@ -382,7 +382,8 @@ async function toggleSessionFromRow(id) {
 }
 
 async function archiveSession(id) {
-  if (!confirm('Hide this session from all lists?\n\nIt stays saved in Firestore (registrations are kept), just hidden from the scanner, session lists, and history. You can delete it permanently any time.')) return;
+  const ok = await confirmDialog('Hide this session from all lists?<br><small>It stays saved in Firestore (registrations are kept), just hidden from the scanner, session lists, and history.</small>', { okText: 'Archive', danger: true });
+  if (!ok) return;
   try {
     await updateDoc(doc(db, 'sessions', id), { archived: true });
     sfx.play('warn');
@@ -397,7 +398,8 @@ async function archiveSession(id) {
 renderHistory();
 
 async function deleteSession(id) {
-  if (!confirm('Delete this session and all of its attendance records? This can\'t be undone.')) return;
+  const ok = await confirmDialog('Delete this session and ALL of its attendance records?<br><small>This <b>cannot be undone</b>. If you only want it hidden, use Archive instead.</small>', { okText: 'Delete', danger: true });
+  if (!ok) return;
 
   try {
     const regsSnap = await getDocs(collection(db, 'sessions', id, 'registrations'));
@@ -558,7 +560,7 @@ document.getElementById('exportCsvBtn').addEventListener('click', () => {
     return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
   const csv = [headers, ...rows].map(row => row.map(csvEscape).join(',')).join('\r\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

@@ -389,3 +389,32 @@ export function countUp(el, target, duration = 600) {
   };
   countTimers.set(el, requestAnimationFrame(step));
 }
+
+/* ---------------------------------------------------------------------
+   confirmDialog — Promise-based custom confirm modal.
+   Native confirm()/alert() are silently blocked in iOS standalone PWAs,
+   which is why buttons like "Archive" appeared to do nothing there.
+--------------------------------------------------------------------- */
+export function confirmDialog(message, { okText = 'Confirm', danger = false } = {}) {
+  return new Promise((resolve) => {
+    if (document.getElementById('confirmDialog')) return resolve(false);
+    const overlay = document.createElement('div');
+    overlay.id = 'confirmDialog';
+    overlay.className = 'confirm-overlay';
+    overlay.innerHTML = `
+      <div class="confirm-card">
+        <p class="confirm-msg">${message}</p>
+        <div class="confirm-actions">
+          <button type="button" class="btn btn-gold confirm-cancel">Cancel</button>
+          <button type="button" class="btn ${danger ? 'btn-confirm-danger' : 'btn-primary'} confirm-ok">${okText}</button>
+        </div>
+      </div>`;
+    const close = (val) => { overlay.remove(); resolve(val); };
+    overlay.querySelector('.confirm-cancel').addEventListener('click', () => close(false));
+    overlay.querySelector('.confirm-ok').addEventListener('click', () => close(true));
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+    document.body.appendChild(overlay);
+    const firstBtn = overlay.querySelector('.confirm-cancel');
+    if (firstBtn) firstBtn.focus();
+  });
+}

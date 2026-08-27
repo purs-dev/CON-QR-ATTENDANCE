@@ -83,31 +83,40 @@ async function getSessionName(sessionId) {
   }
 }
 
-// Live per-session total (same number on every scanner device)
-async function updateSessionChip(sessionId) {
-  try {
-    const q = query(collection(db, 'sessions', sessionId, 'registrations'), where('checkedIn', '==', true));
-    const total = (await getCountFromServer(q)).data().count;
-    let chips = document.getElementById('sessionChips');
-    if (!chips) {
-      chips = document.createElement('div');
-      chips.id = 'sessionChips';
-      chips.className = 'session-chips';
-      const list = document.getElementById('recentList');
-      list.parentNode.insertBefore(chips, list);
+// Live per-session totals — ALWAYS visible for every active session, so a
+// single glance shows 1st/2nd/3rd/4th-year counts together. Clicking a chip
+// picks that session in the manual-check-in dropdown.
+async function refreshSessionChips(activeSessions) {
+  const chips = document.getElementById('sessionChips');
+  if (!chips) return;
+
+  const wantedIds = new Set(activeSessions.map(s => s.id));
+  [...chips.querySelectorAll('.session-chip')].forEach(el => {
+    if (!wantedIds.has(el.dataset.session)) el.remove();
+  });
+
+  const jobs = activeSessions.map(async (s) => {
+    try {
+      const q = query(collection(db, 'sessions', s.id, 'registrations'), where('checkedIn', '==', true));
+      const total = (await getCountFromServer(q)).data().count;
+      let chip = chips.querySelector(`[data-session="${s.id}"]`);
+      if (!chip) {
+        chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'session-chip';
+        chip.dataset.session = s.id;
+        chip.addEventListener('click', () => {
+          const sel = document.getElementById('manualSession');
+          if (sel && sel.querySelector(`option[value="${s.id}"]`)) { sel.value = s.id; }
+        });
+        chips.appendChild(chip);
+      }
+      chip.textContent = `${s.name}: ${total} ✓`;
+    } catch (err) {
+      console.warn('[scanner] chip update failed:', err);
     }
-    let chip = chips.querySelector(`[data-session="${sessionId}"]`);
-    if (!chip) {
-      chip = document.createElement('span');
-      chip.className = 'session-chip';
-      chip.dataset.session = sessionId;
-      chips.appendChild(chip);
-    }
-    const name = await getSessionName(sessionId);
-    chip.textContent = `${name}: ${total} checked in`;
-  } catch (err) {
-    console.warn('[scanner] chip update failed:', err);
-  }
+  });
+  await Promise.all(jobs);
 }
 
 // ---------- core check-in logic (shared by camera scan + manual entry) ----------
@@ -152,7 +161,7 @@ async function checkIn(sessionId, registrationId) {
     sfx.play('success');
     buzz([40, 60, 40]);
     confettiAt(document.getElementById('scanFlash'), { count: 110, power: 9 });
-    updateSessionChip(sessionId);
+    refreshSessionChips([{ id: sessionId, name: sessionName }]);
   } catch (err) {
     console.error(err);
     flash('Connection problem — could not record check-in.', 'error');
@@ -187,6 +196,7 @@ let readerEl = document.getElementById('reader');
 let html5QrCode = null;
 let cameraStarting = false;
 let busyRetries = 0;
+let switchingCamera = false;
 
 function freshScanner() {
   try { html5QrCode && html5QrCode.stop(); } catch (_) { /* wasn't running */ }
@@ -237,6 +247,29 @@ function cameraErrorFromException(err) {
     showCameraError('Could not start camera',
       'Something went wrong starting the camera. Retry, or use manual check-in below.');
   }
+}
+
+// Flip between rear and front cameras (auto-detected by the QR library).
+async function switchCamera() {
+  const btn = document.getElementById('switchCamBtn');
+  if (switchingCamera || !html5QrCode || !html5QrCode.switchCamera) return;
+  switchingCamera = true;
+  if (btn) btn.disabled = true;
+  try {
+    await html5QrCode.switchCamera();
+    sfx.play('pop');
+  } catch (err) {
+    console.warn('[scanner] switchCamera failed:', err);
+    showToast('Could not switch camera.', 'warn');
+  } finally {
+    switchingCamera = false;
+    if (btn) btn.disabled = false;
+  }
+}
+
+function setupCameraSwitchButton() {
+  const btn = document.getElementById('switchCamBtn');
+  if (btn) btn.addEventListener('click', switchCamera);
 }
 
 async function startCamera() {
@@ -304,63 +337,115 @@ async function startCamera() {
 let manualSession = document.getElementById('manualSession');
 let sessionHint = document.getElementById('sessionHint');
 
-// Robust lookup: search the session's REAL fields for the entered ID.
-// The old version only matched a field literally named "studentId", so any
-// session whose fields were customized (renamed Student ID → ID / No., etc.)
-// would report "No registration found" even though the student was registered.
-async function findRegistrationByStudentId(sessionId, studentId) {
-  const regCollection = collection(db, 'sessions', sessionId, 'registrations');
+// ----- manual search: match the session's REAL fields for ID or name -----
+// 1) ID search across identifier-like fields (exact match).
+// 2) Name search across name-like fields (prefix match) — if more than one
+//    student matches, they're shown as tappable picks on the scanner.
+const sessionFieldsCache = new Map();
+async function getSessionFields(sessionId) {
+  if (sessionFieldsCache.has(sessionId)) return sessionFieldsCache.get(sessionId);
+  try {
+    const sSnap = await getDoc(doc(db, 'sessions', sessionId));
+    const fields = (sSnap.exists() && sSnap.data().fields) ? sSnap.data().fields : [];
+    sessionFieldsCache.set(sessionId, fields);
+    return fields;
+  } catch (err) { return []; }
+}
 
-  // 1st pass: the default field id — fast, avoids an extra doc read.
-  const fastSnap = await getDocs(query(regCollection, where('studentId', '==', studentId), limit(1)));
-  if (!fastSnap.empty) return fastSnap.docs[0];
-
-  // 2nd pass: learn the session's configured fields.
-  const sSnap = await getDoc(doc(db, 'sessions', sessionId));
-  const fields = (sSnap.exists() && sSnap.data().fields) ? sSnap.data().fields : [];
-
-  // Order candidates sensibly: ids/labels that scream "student identifier"
-  // first, then every remaining field as a last-resort net.
-  const scored = [];
-  fields.forEach(f => {
+function fieldScores(fields) {
+  return fields.map(f => {
     const id = String(f.id || '');
     const label = String(f.label || '');
     let score = 0;
     if (id === 'studentId') score += 4;
     if (/student/i.test(id) || /student/i.test(label)) score += 3;
-    if (/\bid\b|id number|student no|id no|student number/i.test(`${id} ${label}`)) score += 2;
+    if (/\bid|id number|student no|id no|student number/i.test(`${id} ${label}`)) score += 2;
+    if (/name/i.test(id) || /name/i.test(label)) score += 3;
     if (/^[a-z0-9]+$/i.test(id)) score += 1;
-    scored.push({ f, score });
+    return { f, score };
   });
-  scored.sort((a, b) => b.score - a.score);
-  const candidateIds = scored.map(x => x.f.id);
+}
 
-  for (const fieldId of candidateIds) {
+async function findRegistrationByStudentId(sessionId, term) {
+  const regCollection = collection(db, 'sessions', sessionId, 'registrations');
+
+  // 1st pass: the default field id — fast, avoids extra reads.
+  const fastSnap = await getDocs(query(regCollection, where('studentId', '==', term), limit(1)));
+  if (!fastSnap.empty) return { doc: fastSnap.docs[0], picker: null };
+
+  const fields = await getSessionFields(sessionId);
+  if (!fields.length) return null;
+
+  // ID fields first (exact), then any remaining field (exact).
+  const ids = fieldScores(fields).sort((a, b) => b.score - a.score).map(x => x.f.id);
+  for (const fieldId of ids) {
     if (!fieldId) continue;
-    const snap = await getDocs(query(regCollection, where(fieldId, '==', studentId), limit(1)));
-    if (!snap.empty) return snap.docs[0];
+    const snap = await getDocs(query(regCollection, where(fieldId, '==', term), limit(1)));
+    if (!snap.empty) return { doc: snap.docs[0], picker: null };
   }
+
+  // Name search (prefix) across name-like fields → return candidates.
+  const nameFields = fields.filter(f => /name/i.test(String(f.id || '')) || /name/i.test(String(f.label || '')) ||
+                                        !ids.includes(f.id));  // any non-ID field is tried by name too
+  const candidates = [];
+  for (const fieldId of nameFields.map(f => f.id)) {
+    if (!fieldId || candidates.length >= 5) break;
+    const snap = await getDocs(query(regCollection, where(fieldId, '>=', term), where(fieldId, '<=', term + '\uf8ff'), limit(5)));
+    snap.forEach(d => { if (!candidates.some(x => x.id === d.id)) candidates.push(d); });
+  }
+  if (candidates.length === 1) return { doc: candidates[0], picker: null };
+  if (candidates.length > 1) return { doc: null, picker: candidates };
   return null;
+}
+
+function showPicker(candidates, sessionId) {
+  const wrap = document.getElementById('searchResults');
+  if (!wrap) return;
+  const fields = null;
+  wrap.innerHTML = `
+    <div class="pick-head">Multiple students match — tap the right one:</div>
+    ${candidates.map((d, i) => {
+      const data = d.data();
+      const name = getDisplayName(data);
+      const idVal = data.studentId || '';
+      return `<button type="button" class="pick-row" data-i="${i}"><b>${escapeHtml(name)}</b>${idVal ? `<span>${escapeHtml(idVal)}</span>` : ''}</button>`;
+    }).join('')}`;
+  wrap.style.display = 'block';
+  wrap.querySelectorAll('.pick-row').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      wrap.style.display = 'none';
+      const idx = Number(btn.dataset.i);
+      const match = candidates[idx];
+      if (match) {
+        await checkIn(sessionId, match.id);
+        document.getElementById('manualStudentId').value = '';
+      }
+    });
+  });
 }
 
 function rebindScannerUI() {
   readerEl = document.getElementById('reader');
   manualSession = document.getElementById('manualSession');
   sessionHint = document.getElementById('sessionHint');
+  setupCameraSwitchButton();
 
   document.getElementById('manualBtn').addEventListener('click', async () => {
     const sessionId = manualSession.value;
-    const studentId = document.getElementById('manualStudentId').value.trim();
+    const term = document.getElementById('manualStudentId').value.trim();
+    const resultsWrap = document.getElementById('searchResults');
+    if (resultsWrap) resultsWrap.style.display = 'none';
     if (!sessionId) { flash('Pick a session first.', 'error'); return; }
-    if (!studentId) { flash('Enter a student ID.', 'error'); return; }
+    if (!term) { flash('Enter a student ID or name.', 'error'); return; }
 
     try {
-      const regDoc = await findRegistrationByStudentId(sessionId, studentId);
-      if (!regDoc) {
-        flash('No registration found for that ID in this session.', 'error');
+      const found = await findRegistrationByStudentId(sessionId, term);
+      if (!found) {
+        flash('No registration found for that ID or name.', 'error');
         return;
       }
-      await checkIn(sessionId, regDoc.id);
+      if (found.picker) { showPicker(found.picker, sessionId); return; }
+      await checkIn(sessionId, found.doc.id);
       document.getElementById('manualStudentId').value = '';
     } catch (err) {
       console.error(err);
@@ -408,6 +493,10 @@ function watchActiveSessions() {
     if (hasActiveSessions && !cameraStarted) {
       cameraStarted = true;
       scanFrame.innerHTML = `
+        <div id="sessionChips" class="session-chips" style="display:none;"></div>
+        <div class="scan-toolbar d-flex gap-2 align-items-center mb-2">
+          <button type="button" id="switchCamBtn" class="btn btn-outline-light switch-cam-btn" title="Switch camera (front / back)">🔄</button>
+        </div>
         <div id="reader"></div>
         <div id="scanFlash" class="scan-result-flash" style="display:none;"></div>
         <div class="mt-4">
@@ -415,16 +504,17 @@ function watchActiveSessions() {
           <div id="recentList"><p class="small text-body-secondary">No scans yet.</p></div>
         </div>
         <div class="manual-panel">
-          <p class="small text-body-secondary mb-2">Camera not cooperating? Check a student in manually.</p>
+          <p class="small text-body-secondary mb-2">Camera not cooperating? Check a student in manually — ID or name.</p>
           <div class="mb-2">
             <label class="form-label">Session</label>
             <select class="form-select" id="manualSession"><option value="">— Select a session —</option></select>
             <p id="sessionHint" class="small text-body-secondary" style="display:none; margin:6px 0 0;">No active sessions yet — they appear here automatically once created or reopened in Admin.</p>
           </div>
           <div class="d-flex gap-2">
-            <input type="text" class="form-control" id="manualStudentId" placeholder="Student ID">
+            <input type="text" class="form-control" id="manualStudentId" placeholder="Student ID or name">
             <button class="btn btn-primary" id="manualBtn" style="white-space:nowrap;">Check In</button>
           </div>
+          <div id="searchResults" class="search-results" style="display:none; margin-top:10px;"></div>
         </div>`;
       rebindScannerUI();
       startCamera();
@@ -436,6 +526,13 @@ function watchActiveSessions() {
     manualSession.innerHTML = '<option value="">— Select a session —</option>' +
       active.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}</option>`).join('');
     if (current && active.some(s => s.id === current)) manualSession.value = current;
+
+    // Refresh the live per-session totals chips (always visible for ALL sessions).
+    const chipsWrap = document.getElementById('sessionChips');
+    if (chipsWrap) {
+      chipsWrap.style.display = active.length ? 'flex' : 'none';
+      refreshSessionChips(active);
+    }
   }, (err) => {
     console.error(err);
     showToast('Could not load sessions — check connection. Retrying…', 'error');
