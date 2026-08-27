@@ -319,12 +319,15 @@ function renderHistory() {
       const isOpen = currentSessionId === id;
       return `
       <div class="history-item ${isOpen ? 'open' : ''}" data-id="${id}">
-        <span class="hname">${escapeHtml(data.name || 'Untitled session')} ${active ? '<span class="status-pill in" style="font-size:9px;padding:2px 8px;">Active</span>' : '<span class="status-pill out" style="font-size:9px;padding:2px 8px;">Closed</span>'}</span>
+        <div class="hinfo">
+          <span class="hname">${escapeHtml(data.name || 'Untitled session')}</span>
+          <span class="status-pill ${active ? 'in' : 'out'}">${active ? 'Active' : 'Closed'}</span>
+        </div>
         <div class="hactions">
-          <button data-action="toggle" data-id="${id}" class="${active ? 'close-btn' : 'open-btn'}" title="Open or close this session">${active ? 'Close' : 'Open'}</button>
-          <button data-action="edit" data-id="${id}">Edit</button>
-          <button data-action="archive" data-id="${id}" class="arch">Archive</button>
-          <button data-action="delete" data-id="${id}" class="del">Delete</button>
+          <button data-action="toggle" data-id="${id}" class="${active ? 'close-btn' : 'open-btn'}" title="${active ? 'Close this session' : 'Reopen this session'}">${active ? 'Close' : 'Open'}</button>
+          <button data-action="edit" data-id="${id}" class="ghost-btn" title="Edit session details">Edit</button>
+          <button data-action="archive" data-id="${id}" class="ghost-btn" title="Hide without deleting records">Archive</button>
+          <button data-action="delete" data-id="${id}" class="ghost-btn del" title="Delete permanently">Delete</button>
         </div>
       </div>`;
     }).join('');
@@ -376,7 +379,7 @@ async function toggleSessionFromRow(id) {
     showToast(newActive ? 'Session opened — available to scanners now.' : 'Session closed — no new registrations or check-ins.', newActive ? '' : 'warn');
   } catch (err) {
     console.error(err);
-    showToast('Could not toggle session.', 'error');
+    showToast('Could not toggle session — check your Firestore rules allow updates.', 'error');
     sfx.play('error');
   }
 }
@@ -390,7 +393,7 @@ async function archiveSession(id) {
     showToast('Session archived — hidden from all lists.', 'warn');
   } catch (err) {
     console.error(err);
-    showToast('Could not archive session.', 'error');
+    showToast('Could not archive — check your Firestore rules allow updates.', 'error');
     sfx.play('error');
   }
 }
@@ -478,6 +481,36 @@ function resetLiveUI() {
 // throttle re-renders — counts and CSV export always include EVERYONE.
 const MAX_RENDER_ROWS = 300;
 let renderTimer = null;
+let liveSearchTerm = '';
+
+const liveSearchInput = document.getElementById('liveSearchInput');
+const liveSearchClear = document.getElementById('liveSearchClear');
+let liveSearchTimer = null;
+if (liveSearchInput) {
+  liveSearchInput.addEventListener('input', () => {
+    clearTimeout(liveSearchTimer);
+    liveSearchTimer = setTimeout(() => {
+      liveSearchTerm = liveSearchInput.value.trim().toLowerCase();
+      liveSearchClear.style.display = liveSearchTerm ? 'inline-block' : 'none';
+      renderLiveTable();
+    }, 180);
+  });
+}
+if (liveSearchClear) {
+  liveSearchClear.addEventListener('click', () => {
+    liveSearchTerm = '';
+    liveSearchInput.value = '';
+    liveSearchClear.style.display = 'none';
+    renderLiveTable();
+  });
+}
+
+function filteredRegistrations() {
+  if (!liveSearchTerm) return latestRegistrations;
+  return latestRegistrations.filter(r =>
+    liveFields.some(f => String(r[f.id] ?? '').toLowerCase().includes(liveSearchTerm))
+  );
+}
 
 function renderLiveTable() {
   renderTimer = null;
@@ -494,18 +527,30 @@ function renderLiveTable() {
     return;
   }
 
+  const rows = filteredRegistrations();
   table.style.display = 'table'; empty.style.display = 'none';
   let checkedIn = 0;
   for (const r of latestRegistrations) if (r.checkedIn) checkedIn++;
 
-  body.innerHTML = latestRegistrations.slice(0, MAX_RENDER_ROWS).map(r => {
+  if (!rows.length) {
+    const cols = liveFields.length + 2;
+    body.innerHTML = `<tr><td colspan="${cols}" class="text-center text-body-secondary py-4">No registrations match "${liveSearchTerm}".</td></tr>`;
+    document.getElementById('exportCsvBtn').disabled = false;
+    countUp(document.getElementById('registeredCount'), latestRegistrations.length);
+    countUp(document.getElementById('checkedInCount'), checkedIn);
+    document.getElementById('liveDot').classList.add('live');
+    note.style.display = 'none';
+    return;
+  }
+
+  body.innerHTML = rows.slice(0, MAX_RENDER_ROWS).map(r => {
     const time = r.checkedInAt ? r.checkedInAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
     const cells = liveFields.map(f => `<td>${escapeHtml(r[f.id] ?? '')}</td>`).join('');
     return `<tr>${cells}<td>${r.checkedIn ? '<span class="status-pill in">Checked In</span>' : '<span class="status-pill out">Not Yet</span>'}</td><td>${time}</td></tr>`;
   }).join('');
 
   if (latestRegistrations.length > MAX_RENDER_ROWS) {
-    note.textContent = `Showing the newest ${MAX_RENDER_ROWS} of ${latestRegistrations.length.toLocaleString()} registrations — totals and CSV export include everyone.`;
+    note.textContent = `Showing ${rows.length.toLocaleString()} matching of ${latestRegistrations.length.toLocaleString()} registrations — totals and CSV export include everyone.`;
     note.style.display = 'block';
   } else {
     note.style.display = 'none';
@@ -521,6 +566,10 @@ picker.addEventListener('change', async () => {
   if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
   const sessionId = picker.value;
   if (!sessionId) { resetLiveUI(); return; }
+
+  liveSearchTerm = '';
+  if (liveSearchInput) { liveSearchInput.value = ''; }
+  if (liveSearchClear) { liveSearchClear.style.display = 'none'; }
 
   liveSessionName = picker.options[picker.selectedIndex].text;
   liveFields = defaultFields();
