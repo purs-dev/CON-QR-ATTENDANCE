@@ -305,37 +305,51 @@ let historyUnsub = null;
 function renderHistory() {
   if (historyUnsub) historyUnsub();
   const container = document.getElementById('historyList');
-  const q = query(collection(db, 'sessions'), orderBy('createdAt', 'desc'), limit(20));
+  const q = query(collection(db, 'sessions'), orderBy('createdAt', 'desc'), limit(50));
   historyUnsub = onSnapshot(q, (snap) => {
-    if (snap.empty) {
+    const sessions = snap.docs
+      .map(d => ({ id: d.id, data: d.data() }))
+      .filter(x => x.data.archived !== true); // archived sessions are hidden — not deleted
+    if (!sessions.length) {
       container.innerHTML = '<p class="small text-body-secondary mb-0">No sessions yet.</p>';
       return;
     }
-    container.innerHTML = snap.docs.map(d => {
-      const data = d.data();
+    container.innerHTML = sessions.map(({ id, data }) => {
       const active = data.active !== false;
+      const isOpen = currentSessionId === id;
       return `
-      <div class="history-item">
-        <span class="hname">${escapeHtml(data.name || 'Untitled session')} ${active ? '' : '<span class="status-pill out" style="font-size:9px;padding:2px 8px;">Ended</span>'}</span>
+      <div class="history-item ${isOpen ? 'open' : ''}" data-id="${id}">
+        <span class="hname">${escapeHtml(data.name || 'Untitled session')} ${active ? '<span class="status-pill in" style="font-size:9px;padding:2px 8px;">Active</span>' : '<span class="status-pill out" style="font-size:9px;padding:2px 8px;">Closed</span>'}</span>
         <div class="hactions">
-          <button data-action="qr" data-id="${d.id}">QR</button>
-          <button data-action="edit" data-id="${d.id}">Edit</button>
-          <button data-action="delete" data-id="${d.id}" class="del">Delete</button>
+          <button data-action="toggle" data-id="${id}" class="${active ? 'close-btn' : 'open-btn'}" title="Open or close this session">${active ? 'Close' : 'Open'}</button>
+          <button data-action="edit" data-id="${id}">Edit</button>
+          <button data-action="archive" data-id="${id}" class="arch">Archive</button>
+          <button data-action="delete" data-id="${id}" class="del">Delete</button>
         </div>
       </div>`;
     }).join('');
 
-    container.querySelectorAll('[data-action="qr"]').forEach(b => {
-      b.addEventListener('click', async () => {
+    // Clicking a row opens that session (shows its QR + live controls) —
+    // no need to hit the QR button to "jump into" a session.
+    container.querySelectorAll('.history-item').forEach(row => {
+      row.addEventListener('click', async (e) => {
+        if (e.target.closest('button')) return; // let the buttons do their thing
         try {
-          const s = await getDoc(doc(db, 'sessions', b.dataset.id));
+          const s = await getDoc(doc(db, 'sessions', row.dataset.id));
           if (!s.exists()) { showToast('That session no longer exists.', 'error'); return; }
-          displaySessionQR(b.dataset.id, s.data().name, s.data().active !== false);
+          displaySessionQR(row.dataset.id, s.data().name, s.data().active !== false);
         } catch (err) { console.error(err); showToast('Could not load that session.', 'error'); }
       });
     });
+
+    container.querySelectorAll('[data-action="toggle"]').forEach(b => {
+      b.addEventListener('click', async () => toggleSessionFromRow(b.dataset.id));
+    });
     container.querySelectorAll('[data-action="edit"]').forEach(b => {
       b.addEventListener('click', () => enterEditMode(b.dataset.id));
+    });
+    container.querySelectorAll('[data-action="archive"]').forEach(b => {
+      b.addEventListener('click', () => archiveSession(b.dataset.id));
     });
     container.querySelectorAll('[data-action="delete"]').forEach(b => {
       b.addEventListener('click', () => deleteSession(b.dataset.id));
@@ -346,6 +360,40 @@ function renderHistory() {
     setTimeout(renderHistory, 3000);
   });
 }
+
+async function toggleSessionFromRow(id) {
+  try {
+    const s = await getDoc(doc(db, 'sessions', id));
+    if (!s.exists()) { showToast('That session no longer exists.', 'error'); return; }
+    const wasActive = s.data().active !== false;
+    const newActive = !wasActive;
+    await updateDoc(doc(db, 'sessions', id), { active: newActive });
+    if (currentSessionId === id) {
+      currentSessionActive = newActive;
+      updateSessionStatusUI(newActive);
+    }
+    sfx.play(newActive ? 'pop' : 'warn');
+    showToast(newActive ? 'Session opened — available to scanners now.' : 'Session closed — no new registrations or check-ins.', newActive ? '' : 'warn');
+  } catch (err) {
+    console.error(err);
+    showToast('Could not toggle session.', 'error');
+    sfx.play('error');
+  }
+}
+
+async function archiveSession(id) {
+  if (!confirm('Hide this session from all lists?\n\nIt stays saved in Firestore (registrations are kept), just hidden from the scanner, session lists, and history. You can delete it permanently any time.')) return;
+  try {
+    await updateDoc(doc(db, 'sessions', id), { archived: true });
+    sfx.play('warn');
+    showToast('Session archived — hidden from all lists.', 'warn');
+  } catch (err) {
+    console.error(err);
+    showToast('Could not archive session.', 'error');
+    sfx.play('error');
+  }
+}
+
 renderHistory();
 
 async function deleteSession(id) {
@@ -396,6 +444,7 @@ function loadSessionOptions() {
     snap.forEach(d => {
       const data = d.data();
       if (data.active === false) return;
+      if (data.archived === true) return;
       const opt = document.createElement('option');
       opt.value = d.id;
       opt.textContent = data.name || 'Untitled session';

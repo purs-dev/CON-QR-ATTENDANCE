@@ -385,6 +385,7 @@ function watchActiveSessions() {
     snap.forEach(d => {
       const data = d.data();
       if (data.active === false) return;
+      if (data.archived === true) return; // archived sessions are hidden, not deleted
       active.push({ id: d.id, name: data.name || 'Untitled session' });
     });
     hasActiveSessions = active.length > 0;

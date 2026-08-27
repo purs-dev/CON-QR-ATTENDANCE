@@ -34,7 +34,7 @@ async function init() {
     sessionName = data.name;
     sessionFields = (data.fields && data.fields.length) ? data.fields : defaultFields();
 
-    if (data.active === false) {
+    if (data.active === false || data.archived === true) {
       return showInvalid('Registration Closed', 'This session is no longer accepting new registrations. If you already registered, use the QR you were given earlier.');
     }
 
