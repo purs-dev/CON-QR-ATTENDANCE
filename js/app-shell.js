@@ -21,12 +21,27 @@ const IS_STANDALONE = window.matchMedia('(display-mode: standalone)').matches ||
 
 /* ---------------------------------------------------------------------
    Service worker — registers silently; no-ops on http:// or file://
+   Auto-reloads the page once whenever a newly deployed build takes over,
+   so the installed app instantly reflects whatever changed on the web.
 --------------------------------------------------------------------- */
 if ('serviceWorker' in navigator &&
     (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js')
-      .catch(err => console.warn('[app] service worker not registered:', err));
+  window.addEventListener('load', async () => {
+    try {
+      const reg = await navigator.serviceWorker.register('./sw.js');
+      // When a new service worker (new build) is found:
+      reg.addEventListener('updatefound', () => {
+        const newWorker = reg.installing;
+        if (!newWorker) return;
+        newWorker.addEventListener('statechange', () => {
+          if (newWorker.state === 'activated' && navigator.serviceWorker.controller) {
+            window.location.reload();
+          }
+        });
+      });
+    } catch (err) {
+      console.warn('[app] service worker not registered:', err);
+    }
   });
 }
 
@@ -395,7 +410,7 @@ export function countUp(el, target, duration = 600) {
    Lets you verify WHICH build a device is actually running (handy when
    a cached service worker is serving an older app shell).
 --------------------------------------------------------------------- */
-const APP_BUILD = 'v1.9.3';
+const APP_BUILD = 'v1.9.5';
 (function buildBadge() {
   try {
     const badge = document.createElement('div');

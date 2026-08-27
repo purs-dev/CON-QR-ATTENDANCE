@@ -379,7 +379,7 @@ async function toggleSessionFromRow(id) {
     showToast(newActive ? 'Session opened — available to scanners now.' : 'Session closed — no new registrations or check-ins.', newActive ? '' : 'warn');
   } catch (err) {
     console.error(err);
-    showToast('Could not toggle session — check your Firestore rules allow updates.', 'error');
+    showToast('Could not toggle session — ' + (err.code || err.message || err), 'error');
     sfx.play('error');
   }
 }
@@ -393,7 +393,7 @@ async function archiveSession(id) {
     showToast('Session archived — hidden from all lists.', 'warn');
   } catch (err) {
     console.error(err);
-    showToast('Could not archive — check your Firestore rules allow updates.', 'error');
+    showToast('Could not archive — ' + (err.code || err.message || err), 'error');
     sfx.play('error');
   }
 }
@@ -428,7 +428,7 @@ async function deleteSession(id) {
     showToast('Session deleted.', 'warn');
   } catch (err) {
     console.error(err);
-    showToast('Could not delete — check your Firebase config/rules.', 'error');
+    showToast('Could not delete — ' + (err.code || err.message || err), 'error');
   }
 }
 
