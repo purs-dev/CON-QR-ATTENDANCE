@@ -540,6 +540,29 @@ a, button, .nav-link, .history-item, .form-select{ transition: color .18s, backg
 }
 .btn-confirm-danger:hover{ background:#a54022; border-color:#a54022; color:#fff; }
 
+/* ---------- Live-feed search bar (visible on dark page bg) ---------- */
+.live-search-bar{
+  display:flex; align-items:center; gap:10px; margin-bottom:14px;
+  background:#fff; border:2px solid var(--forest); border-radius:12px; padding:6px 12px;
+  box-shadow:0 0 0 3px rgba(11,61,46,.14), 0 4px 14px rgba(11,33,26,.12);
+}
+.live-search-bar:focus-within{ border-color:var(--gold); box-shadow:0 0 0 3px rgba(212,167,61,.28); }
+.live-search-bar .ls-icon{ color:var(--forest); flex-shrink:0; }
+.live-search-bar .form-control{
+  border:none; box-shadow:none !important; background:#fff; font-size:15px; padding:6px 4px;
+  color:#0B1710 !important; -webkit-text-fill-color:#0B1710;
+}
+.live-search-bar .form-control::placeholder{ color:rgba(11,23,16,.45) !important; opacity:1; }
+.live-search-bar #liveSearchClear{ border-radius:8px; font-size:12px; padding:8px 16px; }
+
+/* ---------- current-session strip + readable names ---------- */
+#sessionCreatedNote{
+  display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:16px;
+  background:var(--paper); border:1.5px solid var(--gold); border-radius:10px; padding:10px 12px;
+}
+#activeSessionLabel{ font-weight:800; color:var(--forest); font-size:14px; }
+.history-item .hname{ font-size:14.5px; font-weight:800; color:var(--ink); min-width:0; }
+
 /* Reset the responsive search-toolbar rule now that it's a styled bar. */
 @media (max-width:575px){
   .live-search-bar{ flex-wrap:wrap; }
