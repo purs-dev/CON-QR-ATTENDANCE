@@ -412,12 +412,12 @@ export function countUp(el, target, duration = 600) {
    Shows the build AND the Firebase project the app talks to, so you can
    instantly verify a device is current and on the right database.
 --------------------------------------------------------------------- */
-const APP_BUILD = 'v2.0.2';
+const APP_BUILD = 'v2.0.3';
 (function buildBadge() {
   try {
     const badge = document.createElement('div');
     badge.id = 'buildBadge';
-    badge.textContent = 'build ' + APP_BUILD + ' · spcf-con-attendance';
+    badge.textContent = 'build ' + APP_BUILD + ' · spcf-con-attendance-12818';
     document.body.appendChild(badge);
   } catch { /* noop */ }
 })();
