@@ -215,6 +215,109 @@ async function autoLinkOutSessions() {
 refreshLinkToOptions();
 autoLinkOutSessions();
 
+// ---------- pairing panel: pick BOTH sessions, press Connect ----------
+const pairOutSelect = document.getElementById('pairOutSelect');
+const pairInSelect = document.getElementById('pairInSelect');
+const connectPairBtn = document.getElementById('connectPairBtn');
+
+let pairSessions = []; // { id, data }
+function pairPartnerName(inId) {
+  const p = pairSessions.find(s => s.id === inId);
+  return p ? (p.data.name || 'Untitled session') : 'Untitled session';
+}
+function renderPartnerOptions() {
+  if (!pairInSelect) return;
+  const outId = pairOutSelect ? pairOutSelect.value : '';
+  const visible = pairSessions.filter(s => s.data.archived !== true && s.id !== outId && !s.data.linkTo);
+  pairInSelect.innerHTML = '<option value="">— pick the time-in session —</option>';
+  visible.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = s.data.name || 'Untitled session';
+    pairInSelect.appendChild(opt);
+  });
+  const hint = document.getElementById('pairLinkHint');
+  if (hint) {
+    const out = pairSessions.find(s => s.id === outId);
+    const outName = out ? (out.data.name || '') : '';
+    if (out && out.data.linkTo) hint.textContent = `"${outName}" is already connected to "${pairPartnerName(out.data.linkTo)}". You can re-connect below or press Disconnect on the list.`;
+    else if (out) hint.textContent = `Scanning "${outName}" will only work for students who already scanned the time-in session you pick.`;
+    else hint.textContent = '';
+  }
+}
+function renderPairList() {
+  const wrap = document.getElementById('pairList');
+  if (!wrap) return;
+  const pairs = pairSessions.filter(s => s.data.archived !== true && s.data.linkTo);
+  if (!pairs.length) {
+    wrap.innerHTML = '<p class="small text-body-secondary mb-0">No sessions connected yet.</p>';
+    return;
+  }
+  wrap.innerHTML = '<div class="small text-body-secondary mb-1">Connected:</div>' +
+    pairs.map(s => `<div class="history-couple"><span class="hname">${escapeHtml(s.data.name || 'Untitled session')}</span><span class="pair-arrow">→</span><span class="hname">${escapeHtml(pairPartnerName(s.data.linkTo))}</span><button type="button" class="btn-link-minimal ms-2" data-unpair="${s.id}">Disconnect</button></div>`).join('');
+  wrap.querySelectorAll('[data-unpair]').forEach(b => {
+    b.addEventListener('click', async () => {
+      try {
+        const s = pairSessions.find(x => x.id === b.dataset.unpair);
+        await updateDoc(doc(db, 'sessions', b.dataset.unpair), { linkTo: null });
+        showToast(s ? `Disconnected "${s.data.name}".` : 'Pairing removed.');
+        sfx.play('warn');
+        refreshPairPanel();
+        refreshLinkToOptions();
+      } catch (err) {
+        console.error(err);
+        showToast('Could not disconnect — ' + (err.code || err.message || err), 'error');
+      }
+    });
+  });
+}
+function renderPairOptions() {
+  if (!pairOutSelect) return;
+  const visible = pairSessions.filter(s => s.data.archived !== true);
+  pairOutSelect.innerHTML = '<option value="">— pick the time-out exit gate —</option>';
+  visible.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = s.data.linkTo
+      ? `${s.data.name || 'Untitled session'}  →  ${pairPartnerName(s.data.linkTo)}`
+      : (s.data.name || 'Untitled session');
+    pairOutSelect.appendChild(opt);
+  });
+  renderPartnerOptions();
+  renderPairList();
+}
+function refreshPairPanel() {
+  if (!pairOutSelect) return;
+  getDocs(query(collection(db, 'sessions'), orderBy('createdAt', 'desc'), limit(100)))
+    .then(snap => {
+      pairSessions = [];
+      snap.forEach(d => pairSessions.push({ id: d.id, data: d.data() }));
+      renderPairOptions();
+    })
+    .catch(err => console.error(err));
+}
+refreshPairPanel();
+
+if (connectPairBtn) connectPairBtn.addEventListener('click', async () => {
+  const outId = pairOutSelect.value, inId = pairInSelect.value;
+  if (!outId || !inId) { showToast('Pick BOTH sessions first.', 'warn'); return; }
+  if (outId === inId) { showToast('Pick two different sessions.', 'warn'); return; }
+  const inSess = pairSessions.find(s => s.id === inId);
+  if (inSess && inSess.data.linkTo) { showToast('That time-in session is itself an exit gate — pick another.', 'warn'); return; }
+  try {
+    await updateDoc(doc(db, 'sessions', outId), { linkTo: inId });
+    const outSess = pairSessions.find(s => s.id === outId);
+    showToast(`Connected: ${outSess ? outSess.data.name : outId} → ${inSess ? inSess.data.name : inId}`);
+    sfx.play('pop');
+    refreshPairPanel();
+    refreshLinkToOptions();
+  } catch (err) {
+    console.error(err);
+    showToast('Could not connect — ' + (err.code || err.message || err), 'error');
+  }
+});
+if (pairOutSelect) pairOutSelect.addEventListener('change', renderPartnerOptions);
+
 // ---------- QR display ----------
 function displaySessionQR(sessionId, name, active = true) {
   currentSessionId = sessionId;
@@ -418,6 +521,7 @@ function renderHistory() {
     container.querySelectorAll('[data-action="delete"]').forEach(b => {
       b.addEventListener('click', () => deleteSession(b.dataset.id));
     });
+    refreshPairPanel();
   }, (err) => {
     console.error(err);
     showToast('Could not load session history — retrying…', 'error');
