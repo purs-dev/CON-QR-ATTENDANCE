@@ -412,7 +412,7 @@ export function countUp(el, target, duration = 600) {
    Shows the build AND the Firebase project the app talks to, so you can
    instantly verify a device is current and on the right database.
 --------------------------------------------------------------------- */
-const APP_BUILD = 'v2.0.8';
+const APP_BUILD = 'v2.1.0';
 (function buildBadge() {
   try {
     const badge = document.createElement('div');

@@ -342,6 +342,8 @@ function resetToNewSessionForm() {
   renderFieldsEditor();
   editingSessionId = null;
   document.getElementById('cancelEditBtn').style.display = 'none';
+  const wto = document.getElementById('withTimeOutCheck');
+  if (wto) wto.checked = false;
   document.getElementById('createSessionBtn').textContent = 'Create Session & Get QR';
 }
 
@@ -357,6 +359,8 @@ async function enterEditMode(id) {
     document.getElementById('eventName').value = data.name;
     currentFields = (data.fields && data.fields.length) ? JSON.parse(JSON.stringify(data.fields)) : defaultFields();
     renderFieldsEditor();
+    const wto = document.getElementById('withTimeOutCheck');
+    if (wto) wto.checked = data.withTimeOut === true;
     document.getElementById('createSessionBtn').textContent = 'Save Changes';
     document.getElementById('cancelEditBtn').style.display = 'inline-block';
     showToast(`Editing "${data.name}".`);
@@ -375,6 +379,7 @@ document.getElementById('createSessionBtn').addEventListener('click', async () =
   if (currentFields.some(f => !f.label || !f.label.trim())) { showToast('Give every field a label.', 'warn'); return; }
 
   const fields = finalizeFieldIds(currentFields);
+  const withTimeOut = document.getElementById('withTimeOutCheck') ? document.getElementById('withTimeOutCheck').checked : false;
   const wasEditing = !!editingSessionId;
   const btn = document.getElementById('createSessionBtn');
   btn.disabled = true;
@@ -383,14 +388,14 @@ document.getElementById('createSessionBtn').addEventListener('click', async () =
   try {
     if (wasEditing) {
       const sessionId = editingSessionId;
-      await updateDoc(doc(db, 'sessions', sessionId), { name, fields });
+      await updateDoc(doc(db, 'sessions', sessionId), { name, fields, withTimeOut });
       showToast(`Session "${name}" updated.`);
       sfx.play('pop');
       displaySessionQR(sessionId, name, currentSessionId === sessionId ? currentSessionActive : true);
       resetToNewSessionForm();
       refreshPairPanel();
     } else {
-      const docRef = await addDoc(collection(db, 'sessions'), { name, createdAt: serverTimestamp(), active: true, fields });
+      const docRef = await addDoc(collection(db, 'sessions'), { name, createdAt: serverTimestamp(), active: true, fields, withTimeOut });
       showToast(`Session "${name}" created.`);
       displaySessionQR(docRef.id, name, true);
       resetToNewSessionForm();

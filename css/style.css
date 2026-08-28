@@ -178,6 +178,13 @@ input, textarea{ cursor:text; }
 .history-couple{ display:flex; align-items:center; flex-wrap:wrap; gap:6px; background:var(--paper); border:1px solid var(--line-soft); border-radius:8px; padding:8px 10px; margin-bottom:6px; }
 .history-couple .hname{ font-size:13px; font-weight:700; color:var(--ink); }
 .pair-arrow{ color:var(--gold); font-weight:900; }
+.qr-role-pill{ display:inline-block; margin-bottom:10px; padding:5px 16px; border-radius:999px; font-size:12px; font-weight:800; letter-spacing:.14em; background:var(--forest); color:#fff; }
+.qr-role-pill.out{ background:var(--gold); color:#06251B; }
+.qr-flip-hint{ font-size:11px; color:var(--ink-soft); margin:8px 0 0; text-align:center; }
+.flip-card{ position:relative; width:260px; height:260px; margin:0 auto; perspective:1200px; cursor:pointer; transform-style:preserve-3d; transition:transform .55s cubic-bezier(.2,.7,.2,1); }
+.flip-card.flipped{ transform:rotateY(180deg); }
+.flip-face{ position:absolute; inset:0; backface-visibility:hidden; -webkit-backface-visibility:hidden; display:flex; align-items:center; justify-content:center; }
+.flip-back{ transform:rotateY(180deg); }
 
 /* ---------- QR badge (used on admin + register page) ---------- */
 .badge-box{

@@ -14,6 +14,7 @@ const qrState = document.getElementById('qrState');
 
 let sessionName = '';
 let sessionFields = [];
+let isCombined = false;
 
 function defaultFields() {
   return [
@@ -33,6 +34,11 @@ async function init() {
     const data = snap.data();
     sessionName = data.name;
     sessionFields = (data.fields && data.fields.length) ? data.fields : defaultFields();
+    isCombined = data.withTimeOut === true;
+    if (isCombined) {
+      const desc = document.getElementById('formDesc');
+      if (desc) desc.textContent = "Fill this out once — you'll get ONE QR that works for time-in AND time-out.";
+    }
 
     if (data.active === false || data.archived === true) {
       return showInvalid('Registration Closed', 'This session is no longer accepting new registrations. If you already registered, use the QR you were given earlier.');
@@ -166,12 +172,48 @@ function showQr(registrationId, name, studentId = '') {
 
   const qrDiv = document.getElementById('qrcode');
   qrDiv.innerHTML = '';
+  const outHolder = document.getElementById('qrcode-out');
+  outHolder.innerHTML = '';
+  const rolePill = document.getElementById('qrRolePill');
+  const hint = document.getElementById('qrFlipHint');
+  const footer = document.getElementById('qrFooterText');
+  const flipCard = document.getElementById('flipCard');
   const payload = `${sessionId}|${registrationId}`;
-  new QRCode(qrDiv, {
+  const qrOpts = {
     text: payload, width: 260, height: 260,
     colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.H
-  });
+  };
+  new QRCode(qrDiv, qrOpts);
   qrDiv.classList.add('pop');
+
+  const applyFace = (flipped) => {
+    flipCard.classList.toggle('flipped', flipped);
+    if (!rolePill || !footer) return;
+    if (flipped) {
+      rolePill.style.display = 'inline-block';
+      rolePill.textContent = 'TIME OUT';
+      rolePill.classList.add('out');
+      footer.textContent = 'PRESENT THIS QR AT CHECK-OUT';
+    } else {
+      rolePill.style.display = isCombined ? 'inline-block' : 'none';
+      rolePill.textContent = 'TIME IN';
+      rolePill.classList.remove('out');
+      footer.textContent = isCombined ? 'SAME QR · TIME IN THEN TIME OUT' : 'PRESENT THIS QR AT CHECK-IN';
+    }
+  };
+
+  if (isCombined) {
+    new QRCode(outHolder, qrOpts);
+    if (hint) hint.style.display = 'block';
+  } else {
+    if (hint) hint.style.display = 'none';
+    rolePill.style.display = 'none';
+  }
+  applyFace(false);
+  flipCard.onclick = () => {
+    applyFace(!flipCard.classList.contains('flipped'));
+    sfx.play('pop');
+  };
 
   // celebration: fanfare + haptic tick + confetti over the fresh badge
   sfx.play('big');
@@ -179,10 +221,13 @@ function showQr(registrationId, name, studentId = '') {
   confettiAt(document.querySelector('#qrState .badge-box'), { count: 170, power: 11 });
 
   document.getElementById('downloadQrBtn').onclick = () => {
-    const canvas = qrDiv.querySelector('canvas');
+    const flipped = flipCard.classList.contains('flipped');
+    const holder = flipped ? outHolder : qrDiv;
+    const canvas = holder.querySelector('canvas');
     if (!canvas) return;
     // High-res PNG with a solid white quiet-zone margin — reliably scannable
     // by any document scanner regardless of the phone's dark-mode setting.
+    const role = flipped ? 'TIMEOUT' : 'TIMEIN';
     const size = 620, pad = 48;
     const c = document.createElement('canvas');
     c.width = size; c.height = size;
@@ -201,8 +246,13 @@ function showQr(registrationId, name, studentId = '') {
       ctx.font = '600 20px Inter, Arial, sans-serif';
       ctx.fillText(`ID: ${studentId}`, size / 2, pad + qrSize + 62, size - pad * 2);
     }
+    if (isCombined) {
+      ctx.fillStyle = '#8a6d1f';
+      ctx.font = '700 20px Inter, Arial, sans-serif';
+      ctx.fillText(flipped ? 'TIME OUT' : 'TIME IN', size / 2, pad + qrSize + 92, size - pad * 2);
+    }
     const a = document.createElement('a');
-    a.download = `${(name || 'student').replace(/\s+/g, '_')}_attendance_qr.png`;
+    a.download = `${(name || 'student').replace(/\s+/g, '_')}_${role}_attendance_qr.png`;
     a.href = c.toDataURL('image/png');
     a.click();
     sfx.play('pop');

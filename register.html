@@ -55,7 +55,7 @@
     <div id="formState" class="card" style="display:none;">
       <span class="session-tag">Registering For</span>
       <h2 id="sessionNameDisplay">—</h2>
-      <p class="desc">Fill this out once — you'll get a personal QR code to show at check-in.</p>
+      <p class="desc" id="formDesc">Fill this out once — you'll get a personal QR code to show at check-in.</p>
 
       <form id="regForm" novalidate>
         <div id="dynamicFields"></div>
@@ -71,12 +71,21 @@
           <div class="badge-title">SPCF NURSING</div>
         </div>
         <h3 id="qrSessionName" class="display-event">—</h3>
-        <div id="qrcode" class="qr-target"></div>
+        <span class="qr-role-pill" id="qrRolePill" style="display:none;">TIME IN</span>
+        <div class="flip-card" id="flipCard">
+          <div class="flip-face flip-front">
+            <div id="qrcode" class="qr-target"></div>
+          </div>
+          <div class="flip-face flip-back">
+            <div id="qrcode-out" class="qr-target"></div>
+          </div>
+        </div>
+        <p class="qr-flip-hint" id="qrFlipHint" style="display:none;">Tap the code to flip · TIME IN / TIME OUT</p>
         <p class="student-name-display" id="qrStudentName"></p>
         <p class="student-id-display" id="qrStudentId"></p>
         <div class="badge-footer">
           <div class="checker-line"></div>
-          <p>PRESENT THIS QR AT CHECK-IN</p>
+          <p id="qrFooterText">PRESENT THIS QR AT CHECK-IN</p>
         </div>
       </div>
       <div class="d-flex gap-2 justify-content-center mt-3">

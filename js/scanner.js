@@ -99,7 +99,7 @@ async function getSession(sessionId) {
         const pSnap = await getDoc(doc(db, 'sessions', d.linkTo));
         partnerName = pSnap.exists() ? (pSnap.data().name || '') : '';
       }
-      out = { id: sessionId, name: d.name || 'Unknown session', linkTo: d.linkTo || null, partnerName };
+      out = { id: sessionId, name: d.name || 'Unknown session', linkTo: d.linkTo || null, withTimeOut: !!d.withTimeOut, partnerName };
     }
   } catch (err) { console.warn(err); }
   sessionCache.set(sessionId, out);
@@ -126,7 +126,13 @@ async function refreshSessionChips(activeSessions) {
     try {
       const sess = await getSession(s.id);
       let label;
-      if (sess && sess.linkTo) {
+      if (sess && sess.withTimeOut) {
+        const qIn = query(collection(db, 'sessions', s.id, 'registrations'), where('checkedIn', '==', true));
+        const qOut = query(collection(db, 'sessions', s.id, 'registrations'), where('checkedOut', '==', true));
+        const cIn = (await getCountFromServer(qIn)).data().count;
+        const cOut = (await getCountFromServer(qOut)).data().count;
+        label = `${cIn} ✓ · ${cOut} out`;
+      } else if (sess && sess.linkTo) {
         const q = query(collection(db, 'sessions', s.id, 'registrations'), where('checkedOut', '==', true));
         label = (await getCountFromServer(q)).data().count + ' out';
       } else {
@@ -243,20 +249,83 @@ async function routeScan(qrSessionId, registrationId) {
       await doTimeOutFromCon(g, registrationId);
       return;
     }
+    if (g && g.withTimeOut) {
+      if (qrSessionId !== g.id) {
+        flash(`${g.name} uses the same QR for time-in and time-out — scan its QR.`, 'error');
+        sfx.play('error');
+        buzz(120);
+        return;
+      }
+      await checkInOrOut(g.id, registrationId);
+      return;
+    }
     if (g) { await checkIn(g.id, registrationId); return; }
     flash('Unknown gate session.', 'error');
     return;
   }
 
-  // 2) Auto mode: a QR minted by a paired (time-out) session routes to time-out.
+  // 2) Auto mode: a session that has BOTH time-in and time-out (withTimeOut) —
+  //    first scan = check-in, second scan = same QR = time-out.
   const qrSess = await getSession(qrSessionId);
+  if (qrSess && qrSess.withTimeOut) {
+    await checkInOrOut(qrSessionId, registrationId);
+    return;
+  }
+
+  // 3) Auto mode: a QR minted by a paired (time-out) session routes to time-out.
   if (qrSess && qrSess.linkTo) {
     await doTimeOutFromOutReg(qrSess, registrationId);
     return;
   }
 
-  // 3) Normal time-in.
+  // 4) Normal time-in.
   await checkIn(qrSessionId, registrationId);
+}
+
+// ---------- combined time-in / time-out (ONE session, ONE QR) ----------
+// The QR the student got from the single form does double duty: the first scan
+// checks them in, the second scan (same QR) checks them out. Time-out is only
+// possible AFTER a time-in — duplicates are blocked.
+async function checkInOrOut(sessionId, registrationId) {
+  try {
+    const ref = doc(db, 'sessions', sessionId, 'registrations', registrationId);
+    const sessionName = await getSessionName(sessionId);
+
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      flash(`Unknown code — not found in ${sessionName}.`, 'error');
+      sfx.play('error'); buzz(120);
+      return;
+    }
+    const data = snap.data();
+    const name = getDisplayName(data);
+    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    if (!data.checkedIn) {
+      // First scan → time-in.
+      await updateDoc(ref, { checkedIn: true, checkedInAt: serverTimestamp() });
+      flash(`✓ ${name} checked in · ${sessionName}`, 'success');
+      addRecent(`[${sessionName}] ${name}`, now);
+      sfx.play('success'); buzz([40, 60, 40]);
+      confettiAt(document.getElementById('scanFlash'), { count: 110, power: 9 });
+    } else if (!data.checkedOut) {
+      // Second scan → time-out.
+      await updateDoc(ref, { checkedOut: true, checkedOutAt: serverTimestamp() });
+      flash(`✓ ${name} timed out · ${sessionName}`, 'success');
+      addRecent(`[${sessionName}] ${name} timed out`, now);
+      sfx.play('success'); buzz([40, 60, 40]);
+      confettiAt(document.getElementById('scanFlash'), { count: 110, power: 9 });
+    } else {
+      const t = data.checkedOutAt ? data.checkedOutAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+      flash(`${name} already timed out${t ? ' at ' + t : ''} · ${sessionName}`, 'warn');
+      sfx.play('warn'); buzz(80);
+    }
+    refreshSessionChips([{ id: sessionId, name: sessionName }]);
+  } catch (err) {
+    console.error(err);
+    flash(scannerError('record check-in / time-out', err), 'error');
+    sfx.play('error'); buzz(120);
+  }
 }
 
 // ---------- time-out flow (paired sessions) ----------
@@ -624,6 +693,8 @@ function showPicker(candidates, sessionId) {
           const pReg = await partnerRegByStudentId(sSnap.linkTo, match.data().studentId || '');
           if (pReg) await recordTimeOut(sSnap, pReg.ref);
           else flash(`No time-in found for ${getDisplayName(match.data())} in ${sSnap.partnerName || 'the paired session'}.`, 'error');
+        } else if (sSnap && sSnap.withTimeOut) {
+          await checkInOrOut(sessionId, match.id);
         } else {
           await checkIn(sessionId, match.id);
         }
@@ -669,7 +740,8 @@ function rebindScannerUI() {
         return;
       }
       if (found.picker) { showPicker(found.picker, sessionId); return; }
-      await checkIn(sessionId, found.doc.id);
+      if (session && session.withTimeOut) await checkInOrOut(sessionId, found.doc.id);
+      else await checkIn(sessionId, found.doc.id);
       document.getElementById('manualStudentId').value = '';
     } catch (err) {
       console.error(err);
