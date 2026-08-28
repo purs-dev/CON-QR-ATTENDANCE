@@ -750,8 +750,6 @@ function rebindScannerUI() {
         return;
       }
       const url = `${baseDir}register.html?session=${encodeURIComponent(sid)}&walkin=1`;
-      const target = document.getElementById('walkinTarget');
-      if (target) target.textContent = url;
       const qrHost = document.getElementById('walkinQr');
       qrHost.innerHTML = '';
       if (typeof QRCode !== 'undefined') {
@@ -854,7 +852,6 @@ function watchActiveSessions() {
           <div id="walkinPanel" style="display:none; margin-top:12px; text-align:center;">
             <p class="small text-body-secondary mb-2">Late-comers scan this with their own phone — time-in is marked LATE automatically and they get a TIME OUT QR.</p>
             <div id="walkinQr" class="qr-target" style="margin:0 auto;"></div>
-            <p class="small mt-2 mb-0" id="walkinTarget" style="color:var(--ink-soft);"></p>
           </div>
           <div id="searchResults" class="search-results" style="display:none; margin-top:10px;"></div>
         </div>`;

@@ -226,8 +226,8 @@ function showQr(registrationId, name, studentId = '') {
   document.getElementById('downloadQrBtn').onclick = () => {
     const outFace = isWalkIn || flipCard.classList.contains('flipped');
     const holder = isWalkIn ? qrDiv : (outFace ? outHolder : qrDiv);
-    const canvas = holder.querySelector('canvas');
-    if (!canvas) return;
+    const src = holder.querySelector('canvas, img');
+    if (!src) return;
     // High-res PNG with a solid white quiet-zone margin — reliably scannable
     // by any document scanner regardless of the phone's dark-mode setting.
     const role = outFace ? 'TIMEOUT' : 'TIMEIN';
@@ -237,7 +237,7 @@ function showQr(registrationId, name, studentId = '') {
     const ctx = c.getContext('2d');
     ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, size, size);
     const qrSize = size - pad * 2 - 56; // leave room for the text below
-    ctx.drawImage(canvas, pad, pad, qrSize, qrSize);
+    ctx.drawImage(src, pad, pad, qrSize, qrSize);
     if (name) {
       ctx.fillStyle = '#0B1710';
       ctx.textAlign = 'center';
@@ -254,11 +254,34 @@ function showQr(registrationId, name, studentId = '') {
       ctx.font = '700 20px Inter, Arial, sans-serif';
       ctx.fillText(outFace ? 'TIME OUT' : 'TIME IN', size / 2, pad + qrSize + 92, size - pad * 2);
     }
-    const a = document.createElement('a');
-    a.download = `${(name || 'student').replace(/\s+/g, '_')}_${role}_attendance_qr.png`;
-    a.href = c.toDataURL('image/png');
-    a.click();
-    sfx.play('pop');
+    const filename = `${(name || 'student').replace(/\s+/g, '_')}_${role}_attendance_qr.png`;
+    // Blob download (works on iOS Safari + Android). Falls back to a fresh
+    // preview tab if blob downloads are blocked.
+    const downloadBlob = (blob) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.download = filename;
+      a.href = url;
+      a.rel = 'noopener';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 4000);
+    };
+    if (c.toBlob) {
+      try {
+        c.toBlob((blob) => {
+          if (blob) { downloadBlob(blob); sfx.play('pop'); return; }
+          // toBlob refused — open the image directly so it can be saved long-press.
+          window.open(c.toDataURL('image/png'), '_blank');
+        }, 'image/png');
+      } catch (err) {
+        console.error(err);
+        window.open(c.toDataURL('image/png'), '_blank');
+      }
+    } else {
+      window.open(c.toDataURL('image/png'), '_blank');
+    }
   };
 }
 

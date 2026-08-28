@@ -192,8 +192,8 @@ function displaySessionQR(sessionId, name, active = true) {
   updateSessionStatusUI(active);
 
   document.getElementById('downloadBtn').onclick = () => {
-    const canvas = qrDiv.querySelector('canvas');
-    if (!canvas) return;
+    const src = qrDiv.querySelector('canvas, img');
+    if (!src) return;
     // Re-draw at high resolution with a solid white margin (quiet zone) so
     // scanners read it reliably even when zoomed out or on dark-mode phones.
     const size = 600, pad = 48;
@@ -201,11 +201,27 @@ function displaySessionQR(sessionId, name, active = true) {
     c.width = size; c.height = size;
     const ctx = c.getContext('2d');
     ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, size, size);
-    ctx.drawImage(canvas, pad, pad, size - pad * 2, size - pad * 2);
-    const a = document.createElement('a');
-    a.download = `${name.replace(/\s+/g, '_')}_registration_qr.png`;
-    a.href = c.toDataURL('image/png');
-    a.click();
+    ctx.drawImage(src, pad, pad, size - pad * 2, size - pad * 2);
+    const filename = `${name.replace(/\s+/g, '_')}_registration_qr.png`;
+    const downloadBlob = (blob) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.download = filename;
+      a.href = url;
+      a.rel = 'noopener';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 4000);
+    };
+    if (c.toBlob) {
+      c.toBlob((blob) => {
+        if (blob) downloadBlob(blob);
+        else window.open(c.toDataURL('image/png'), '_blank');
+      }, 'image/png');
+    } else {
+      window.open(c.toDataURL('image/png'), '_blank');
+    }
   };
   document.getElementById('copyLinkBtn').onclick = () => {
     navigator.clipboard.writeText(link).then(() => showToast('Registration link copied.'));
@@ -548,8 +564,10 @@ function renderLiveTable() {
     const outTime = r.checkedOutAt ? r.checkedOutAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
     const cells = liveFields.map(f => `<td>${escapeHtml(r[f.id] ?? '')}</td>`).join('');
     const timedOut = r.checkedOut ? `<span class="status-pill to">Timed Out</span>${outTime ? ' ' + escapeHtml(outTime) : ''}` : '—';
-    const latePill = r.late ? '<span class="status-pill late">Late</span>' : '';
-    return `<tr>${cells}<td>${latePill}${r.checkedIn ? '<span class="status-pill in">Checked In</span>' : '<span class="status-pill out">Not Yet</span>'}</td><td>${time}</td><td>${timedOut}</td></tr>`;
+    const statusPill = r.late
+      ? '<span class="status-pill late">Late</span>'
+      : (r.checkedIn ? '<span class="status-pill in">Checked In</span>' : '<span class="status-pill out">Not Yet</span>');
+    return `<tr>${cells}<td>${statusPill}</td><td>${time}</td><td>${timedOut}</td></tr>`;
   }).join('');
 
   if (latestRegistrations.length > MAX_RENDER_ROWS) {
