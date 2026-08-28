@@ -6,6 +6,7 @@ import { sfx, confettiBurstAtElement as confettiAt, buzz, confirmDialog } from "
 
 const params = new URLSearchParams(location.search);
 const sessionId = params.get('session');
+const isWalkIn = params.get('walkin') === '1';
 
 const loadingState = document.getElementById('loadingState');
 const invalidState = document.getElementById('invalidState');
@@ -35,7 +36,8 @@ async function init() {
     sessionName = data.name;
     sessionFields = (data.fields && data.fields.length) ? data.fields : defaultFields();
     const desc = document.getElementById('formDesc');
-    if (desc) desc.textContent = "Fill this out once — you'll get ONE QR that works for time-in AND time-out.";
+    if (isWalkIn) desc.textContent = "Walk-in registration — your time-in is recorded automatically as LATE. Get your TIME OUT QR now.";
+    else desc.textContent = "Fill this out once — you'll get ONE QR that works for time-in AND time-out.";
 
     if (data.active === false || data.archived === true) {
       return showInvalid('Registration Closed', 'This session is no longer accepting new registrations. If you already registered, use the QR you were given earlier.');
@@ -93,6 +95,10 @@ document.getElementById('regForm').addEventListener('submit', async (e) => {
   btn.disabled = true; btn.textContent = 'Submitting…';
 
   try {
+    const meta = isWalkIn
+      ? { registeredAt: serverTimestamp(), late: true, checkedIn: true, checkedInAt: serverTimestamp(), checkedOut: false, checkedOutAt: null }
+      : { registeredAt: serverTimestamp(), checkedIn: false, checkedInAt: null, checkedOut: false, checkedOutAt: null };
+
     const regCollection = collection(db, 'sessions', sessionId, 'registrations');
     let registrationId = null;
 
@@ -112,28 +118,14 @@ document.getElementById('regForm').addEventListener('submit', async (e) => {
         if (!legacy.empty) {
           registrationId = legacy.docs[0].id;
         } else {
-          await setDoc(primaryRef, {
-            ...values,
-            registeredAt: serverTimestamp(),
-            checkedIn: false,
-            checkedInAt: null,
-            checkedOut: false,
-            checkedOutAt: null
-          });
+          await setDoc(primaryRef, { ...values, ...meta });
           registrationId = primaryId;
         }
       }
     }
 
     if (!registrationId) {
-      const docRef = await addDoc(regCollection, {
-        ...values,
-        registeredAt: serverTimestamp(),
-        checkedIn: false,
-        checkedInAt: null,
-        checkedOut: false,
-        checkedOutAt: null
-      });
+      const docRef = await addDoc(regCollection, { ...values, ...meta });
       registrationId = docRef.id;
     }
 
@@ -207,10 +199,24 @@ function showQr(registrationId, name, studentId = '') {
     rolePill.style.display = 'none';
   }
   applyFace(false);
-  flipCard.onclick = () => {
-    applyFace(!flipCard.classList.contains('flipped'));
-    sfx.play('pop');
-  };
+  if (isWalkIn) {
+    // Walk-in badge = a single TIME OUT face. Time-in was already recorded
+    // automatically as LATE the moment they registered — nothing to flip.
+    outHolder.innerHTML = '';
+    if (hint) hint.style.display = 'none';
+    const late = document.getElementById('lateNote');
+    if (late) late.style.display = 'block';
+    rolePill.style.display = 'inline-block';
+    rolePill.textContent = 'TIME OUT';
+    rolePill.classList.add('out');
+    if (footer) footer.textContent = 'PRESENT THIS QR AT CHECK-OUT';
+    flipCard.onclick = null;
+  } else {
+    flipCard.onclick = () => {
+      applyFace(!flipCard.classList.contains('flipped'));
+      sfx.play('pop');
+    };
+  }
 
   // celebration: fanfare + haptic tick + confetti over the fresh badge
   sfx.play('big');
@@ -218,13 +224,13 @@ function showQr(registrationId, name, studentId = '') {
   confettiAt(document.querySelector('#qrState .badge-box'), { count: 170, power: 11 });
 
   document.getElementById('downloadQrBtn').onclick = () => {
-    const flipped = flipCard.classList.contains('flipped');
-    const holder = flipped ? outHolder : qrDiv;
+    const outFace = isWalkIn || flipCard.classList.contains('flipped');
+    const holder = isWalkIn ? qrDiv : (outFace ? outHolder : qrDiv);
     const canvas = holder.querySelector('canvas');
     if (!canvas) return;
     // High-res PNG with a solid white quiet-zone margin — reliably scannable
     // by any document scanner regardless of the phone's dark-mode setting.
-    const role = flipped ? 'TIMEOUT' : 'TIMEIN';
+    const role = outFace ? 'TIMEOUT' : 'TIMEIN';
     const size = 620, pad = 48;
     const c = document.createElement('canvas');
     c.width = size; c.height = size;
@@ -246,7 +252,7 @@ function showQr(registrationId, name, studentId = '') {
     if (isCombined) {
       ctx.fillStyle = '#8a6d1f';
       ctx.font = '700 20px Inter, Arial, sans-serif';
-      ctx.fillText(flipped ? 'TIME OUT' : 'TIME IN', size / 2, pad + qrSize + 92, size - pad * 2);
+      ctx.fillText(outFace ? 'TIME OUT' : 'TIME IN', size / 2, pad + qrSize + 92, size - pad * 2);
     }
     const a = document.createElement('a');
     a.download = `${(name || 'student').replace(/\s+/g, '_')}_${role}_attendance_qr.png`;

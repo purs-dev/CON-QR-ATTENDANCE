@@ -5,6 +5,8 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { sfx, confettiBurstAtElement as confettiAt, buzz } from "./app-shell.js";
 
+const baseDir = location.href.substring(0, location.href.lastIndexOf('/') + 1);
+
 // ---------- toast (for camera-level errors) ----------
 function showToast(message, type = '') {
   const stack = document.getElementById('toastStack');
@@ -735,6 +737,34 @@ function rebindScannerUI() {
       flash(scannerError('look up that ID', err), 'error');
     }
   });
+
+  const walkinBtn = document.getElementById('walkinBtn');
+  const walkinPanel = document.getElementById('walkinPanel');
+  if (walkinBtn && walkinPanel) {
+    walkinBtn.addEventListener('click', () => {
+      const sid = gateSessionId || manualSession.value;
+      if (!sid) { flash('Pick a session first (use the dropdown above).', 'error'); return; }
+      if (walkinPanel.style.display === 'block') {
+        walkinPanel.style.display = 'none';
+        walkinBtn.textContent = 'Show walk-in QR';
+        return;
+      }
+      const url = `${baseDir}register.html?session=${encodeURIComponent(sid)}&walkin=1`;
+      const target = document.getElementById('walkinTarget');
+      if (target) target.textContent = url;
+      const qrHost = document.getElementById('walkinQr');
+      qrHost.innerHTML = '';
+      if (typeof QRCode !== 'undefined') {
+        new QRCode(qrHost, {
+          text: url, width: 200, height: 200,
+          colorDark: '#0B3D2E', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.H
+        });
+      }
+      walkinPanel.style.display = 'block';
+      walkinBtn.textContent = 'Hide walk-in QR';
+      sfx.play('pop');
+    });
+  }
 }
 
 async function updateGateHint() {
@@ -817,6 +847,14 @@ function watchActiveSessions() {
           <div class="d-flex gap-2">
             <input type="text" class="form-control" id="manualStudentId" placeholder="Student ID or name">
             <button class="btn btn-primary" id="manualBtn" style="white-space:nowrap;">Check In</button>
+          </div>
+          <div class="d-grid gap-2 mt-2">
+            <button type="button" class="btn btn-gold" id="walkinBtn">Show walk-in QR</button>
+          </div>
+          <div id="walkinPanel" style="display:none; margin-top:12px; text-align:center;">
+            <p class="small text-body-secondary mb-2">Late-comers scan this with their own phone — time-in is marked LATE automatically and they get a TIME OUT QR.</p>
+            <div id="walkinQr" class="qr-target" style="margin:0 auto;"></div>
+            <p class="small mt-2 mb-0" id="walkinTarget" style="color:var(--ink-soft);"></p>
           </div>
           <div id="searchResults" class="search-results" style="display:none; margin-top:10px;"></div>
         </div>`;

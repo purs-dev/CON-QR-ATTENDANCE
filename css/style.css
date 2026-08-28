@@ -220,6 +220,8 @@ input, textarea{ cursor:text; }
 .status-pill.out::before{ content:""; width:6px; height:6px; border-radius:50%; background:#9CA69E; }
 .status-pill.to{ background:rgba(212,167,61,0.2); color:#6B4E0A; }
 .status-pill.to::before{ content:""; width:6px; height:6px; border-radius:50%; background:var(--gold); }
+.status-pill.late{ background:rgba(232,150,46,0.2); color:#7A4A00; }
+.status-pill.late::before{ content:""; width:6px; height:6px; border-radius:50%; background:#E8962E; }
 
 /* Time-out gate bar on the scanner */
 .gate-bar{ background:rgba(212,167,61,0.1); border:1px solid rgba(212,167,61,0.45);

@@ -548,7 +548,8 @@ function renderLiveTable() {
     const outTime = r.checkedOutAt ? r.checkedOutAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
     const cells = liveFields.map(f => `<td>${escapeHtml(r[f.id] ?? '')}</td>`).join('');
     const timedOut = r.checkedOut ? `<span class="status-pill to">Timed Out</span>${outTime ? ' ' + escapeHtml(outTime) : ''}` : '—';
-    return `<tr>${cells}<td>${r.checkedIn ? '<span class="status-pill in">Checked In</span>' : '<span class="status-pill out">Not Yet</span>'}</td><td>${time}</td><td>${timedOut}</td></tr>`;
+    const latePill = r.late ? '<span class="status-pill late">Late</span>' : '';
+    return `<tr>${cells}<td>${latePill}${r.checkedIn ? '<span class="status-pill in">Checked In</span>' : '<span class="status-pill out">Not Yet</span>'}</td><td>${time}</td><td>${timedOut}</td></tr>`;
   }).join('');
 
   if (latestRegistrations.length > MAX_RENDER_ROWS) {
@@ -602,10 +603,11 @@ picker.addEventListener('change', async () => {
 
 document.getElementById('exportCsvBtn').addEventListener('click', () => {
   if (!latestRegistrations.length) { showToast('No data to export yet.', 'warn'); return; }
-  const headers = [...liveFields.map(f => f.label), 'Status', 'Registered At', 'Checked-In At', 'Checked-Out At'];
+  const headers = [...liveFields.map(f => f.label), 'Status', 'Late', 'Registered At', 'Checked-In At', 'Checked-Out At'];
   const rows = latestRegistrations.map(r => [
     ...liveFields.map(f => r[f.id] ?? ''),
     r.checkedIn ? 'Checked In' : 'Not Yet',
+    r.late ? 'Late' : '',
     r.registeredAt ? r.registeredAt.toDate().toLocaleString() : '',
     r.checkedInAt ? r.checkedInAt.toDate().toLocaleString() : '',
     r.checkedOutAt ? r.checkedOutAt.toDate().toLocaleString() : ''
