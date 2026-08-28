@@ -8,7 +8,7 @@
 //   4. Register the app, copy the firebaseConfig object it shows you
 // =====================================================================
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAKqWkZXp8O5GKqk1uhvBlaiyzmDVmUWPg",
@@ -21,4 +21,10 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+// Persistent local cache: every scan (check-in AND time-out) is written to the
+// device immediately and syncs to the cloud once signal returns. Ordinary
+// writes queue offline — only true transactions wouldn't, which is why the
+// scanner avoids them. Safe for a packed hall with flaky Wi-Fi.
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+});

@@ -173,6 +173,11 @@ input, textarea{ cursor:text; }
 .history-item button.close-btn{ background:var(--amber); border-color:var(--amber); color:#fff; }
 .history-item button.ghost-btn{ background:transparent; color:var(--ink-soft); border-color:var(--line-soft); }
 .history-item button.ghost-btn.del{ color:var(--danger); }
+.pair-module{ background:rgba(212,167,61,0.07); border:1.5px solid rgba(212,167,61,.35); border-radius:12px; padding:14px 16px; }
+.pair-module h3{ font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:.14em; color:#8a6d1f; margin-bottom:8px; }
+.history-couple{ display:flex; align-items:center; flex-wrap:wrap; gap:6px; background:var(--paper); border:1px solid var(--line-soft); border-radius:8px; padding:8px 10px; margin-bottom:6px; }
+.history-couple .hname{ font-size:13px; font-weight:700; color:var(--ink); }
+.pair-arrow{ color:var(--gold); font-weight:900; }
 
 /* ---------- QR badge (used on admin + register page) ---------- */
 .badge-box{

@@ -12,7 +12,7 @@
    Bump VERSION whenever you ship changes to force a cache refresh.
    ===================================================================== */
 
-const VERSION = 'v2.0.7';
+const VERSION = 'v2.0.8';
 const CACHE_NAME = `con-attendance-${VERSION}`;
 
 const PRECACHE_URLS = [

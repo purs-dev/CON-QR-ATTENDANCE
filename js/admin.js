@@ -160,61 +160,10 @@ document.getElementById('addFieldBtn').addEventListener('click', () => {
 });
 renderFieldsEditor();
 
-// ---------- time-out pairing ----------
-// An (OUT) session can be paired to a time-in session ("linkTo"). Students
-// can only time out there if they time-in'd for the partner first.
-const linkToSelect = document.getElementById('linkToSelect');
-async function refreshLinkToOptions(excludeId) {
-  try {
-    const snap = await getDocs(query(collection(db, 'sessions'), limit(100)));
-    linkToSelect.innerHTML = '<option value="">— Normal session (no time-out pairing) —</option>';
-    snap.forEach(d => {
-      if (d.id === excludeId) return;
-      const data = d.data();
-      if (data.archived === true) return;
-      if (data.linkTo) return; // already an OUT session — can't be a partner too
-      const opt = document.createElement('option');
-      opt.value = d.id;
-      opt.textContent = data.name || 'Untitled session';
-      linkToSelect.appendChild(opt);
-    });
-  } catch (err) { console.error(err); }
-}
-
-// One-time convenience: match "2ND YEAR (OUT)" → "2ND YEAR CON" style names
-// and link sessions that aren't paired yet. Idempotent — never overwrites an
-// existing pairing.
-async function autoLinkOutSessions() {
-  try {
-    const snap = await getDocs(query(collection(db, 'sessions'), limit(100)));
-    const all = [];
-    snap.forEach(d => all.push({ id: d.id, data: d.data() }));
-    const byName = new Map();
-    all.forEach(s => {
-      const n = String(s.data.name || '');
-      if (n && !byName.has(n)) byName.set(n, s.id);
-    });
-    const pairs = [];
-    for (const s of all) {
-      if (s.data.linkTo) continue;
-      const nm = String(s.data.name || '');
-      const m = nm.match(/^(.*?)\s*\(OUT\)$/i);
-      if (!m) continue;
-      const base = m[1].trim();
-      const target = byName.get(base + ' CON') || byName.get(base) || byName.get(nm.replace(/\(OUT\)/i, 'CON').trim());
-      if (target && target !== s.id) pairs.push({ outId: s.id, inId: target });
-    }
-    if (!pairs.length) return;
-    const batch = writeBatch(db);
-    pairs.forEach(p => batch.update(doc(db, 'sessions', p.outId), { linkTo: p.inId }));
-    await batch.commit();
-    showToast(`${pairs.length} time-out session(s) auto-linked to their time-in partner.`);
-    refreshLinkToOptions();
-  } catch (err) { console.warn('autoLinkOutSessions:', err); }
-}
-refreshLinkToOptions();
-autoLinkOutSessions();
-
+// ---------- pairing: the ONLY way to connect sessions ----------
+// Pairing lives exclusively on the Connect Time-In ↔ Time-Out panel below.
+// To (re)pair: pick the exit-gate session, pick the matching time-in session,
+// press Connect. linkTo = the time-in session this gate checks against.
 // ---------- pairing panel: pick BOTH sessions, press Connect ----------
 const pairOutSelect = document.getElementById('pairOutSelect');
 const pairInSelect = document.getElementById('pairInSelect');
@@ -263,7 +212,6 @@ function renderPairList() {
         showToast(s ? `Disconnected "${s.data.name}".` : 'Pairing removed.');
         sfx.play('warn');
         refreshPairPanel();
-        refreshLinkToOptions();
       } catch (err) {
         console.error(err);
         showToast('Could not disconnect — ' + (err.code || err.message || err), 'error');
@@ -310,7 +258,6 @@ if (connectPairBtn) connectPairBtn.addEventListener('click', async () => {
     showToast(`Connected: ${outSess ? outSess.data.name : outId} → ${inSess ? inSess.data.name : inId}`);
     sfx.play('pop');
     refreshPairPanel();
-    refreshLinkToOptions();
   } catch (err) {
     console.error(err);
     showToast('Could not connect — ' + (err.code || err.message || err), 'error');
@@ -394,7 +341,6 @@ function resetToNewSessionForm() {
   currentFields = defaultFields();
   renderFieldsEditor();
   editingSessionId = null;
-  if (linkToSelect) linkToSelect.value = '';
   document.getElementById('cancelEditBtn').style.display = 'none';
   document.getElementById('createSessionBtn').textContent = 'Create Session & Get QR';
 }
@@ -411,8 +357,6 @@ async function enterEditMode(id) {
     document.getElementById('eventName').value = data.name;
     currentFields = (data.fields && data.fields.length) ? JSON.parse(JSON.stringify(data.fields)) : defaultFields();
     renderFieldsEditor();
-    await refreshLinkToOptions(id);
-    if (linkToSelect) linkToSelect.value = data.linkTo || '';
     document.getElementById('createSessionBtn').textContent = 'Save Changes';
     document.getElementById('cancelEditBtn').style.display = 'inline-block';
     showToast(`Editing "${data.name}".`);
@@ -431,7 +375,6 @@ document.getElementById('createSessionBtn').addEventListener('click', async () =
   if (currentFields.some(f => !f.label || !f.label.trim())) { showToast('Give every field a label.', 'warn'); return; }
 
   const fields = finalizeFieldIds(currentFields);
-  const linkTo = linkToSelect ? linkToSelect.value : '';
   const wasEditing = !!editingSessionId;
   const btn = document.getElementById('createSessionBtn');
   btn.disabled = true;
@@ -440,18 +383,18 @@ document.getElementById('createSessionBtn').addEventListener('click', async () =
   try {
     if (wasEditing) {
       const sessionId = editingSessionId;
-      await updateDoc(doc(db, 'sessions', sessionId), { name, fields, linkTo: linkTo || null });
+      await updateDoc(doc(db, 'sessions', sessionId), { name, fields });
       showToast(`Session "${name}" updated.`);
       sfx.play('pop');
       displaySessionQR(sessionId, name, currentSessionId === sessionId ? currentSessionActive : true);
       resetToNewSessionForm();
-      refreshLinkToOptions();
+      refreshPairPanel();
     } else {
-      const docRef = await addDoc(collection(db, 'sessions'), { name, createdAt: serverTimestamp(), active: true, fields, linkTo: linkTo || null });
+      const docRef = await addDoc(collection(db, 'sessions'), { name, createdAt: serverTimestamp(), active: true, fields });
       showToast(`Session "${name}" created.`);
       displaySessionQR(docRef.id, name, true);
       resetToNewSessionForm();
-      refreshLinkToOptions();
+      refreshPairPanel();
       sfx.play('big');
       confettiAt(document.getElementById('badgeContainer'), { count: 140, power: 10 });
     }

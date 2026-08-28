@@ -1,7 +1,7 @@
 import { db } from "./firebase-config.js";
 import {
-  doc, getDoc, collection, query, where, getDocs, orderBy, limit, serverTimestamp,
-  runTransaction, getCountFromServer, onSnapshot
+  doc, getDoc, updateDoc, setDoc, collection, query, where, getDocs, orderBy, limit, serverTimestamp,
+  getCountFromServer, onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { sfx, confettiBurstAtElement as confettiAt, buzz } from "./app-shell.js";
 
@@ -154,27 +154,29 @@ async function refreshSessionChips(activeSessions) {
 }
 
 // ---------- core check-in logic (shared by camera scan + manual entry) ----------
-// Uses a transaction: if two scanner devices scan the same student at the
-// same moment, exactly ONE wins and the other shows "already checked in".
+// Plain read + update (NOT a transaction): ordinary writes queue in Firestore's
+// offline cache, so a scan still records during weak signal and syncs the
+// moment the connection returns. Duplicate scans are caught by the checkedIn
+// marker + the debounce.
 async function checkIn(sessionId, registrationId) {
   try {
     const ref = doc(db, 'sessions', sessionId, 'registrations', registrationId);
     const sessionName = await getSessionName(sessionId);
 
     let outcome = null;
-    await runTransaction(db, async (tx) => {
-      const snap = await tx.get(ref);
-      if (!snap.exists()) { outcome = { status: 'unknown' }; return; }
+    const snap = await getDoc(ref);
+    if (!snap.exists()) { outcome = { status: 'unknown' }; }
+    else {
       const data = snap.data();
       const name = getDisplayName(data);
       if (data.checkedIn) {
         const time = data.checkedInAt ? data.checkedInAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
         outcome = { status: 'already', name, time };
-        return;
+      } else {
+        await updateDoc(ref, { checkedIn: true, checkedInAt: serverTimestamp() });
+        outcome = { status: 'ok', name };
       }
-      tx.update(ref, { checkedIn: true, checkedInAt: serverTimestamp() });
-      outcome = { status: 'ok', name };
-    });
+    }
 
     if (!outcome || outcome.status === 'unknown') {
       flash(`Unknown code — not found in ${sessionName}.`, 'error');
@@ -273,44 +275,40 @@ async function partnerRegByStudentId(partnerSessionId, studentId) {
 
 async function recordTimeOut(outSession, partnerDocRef) {
   try {
-    const outcome = await runTransaction(db, async (tx) => {
-      const pSnap = await tx.get(partnerDocRef);
-      if (!pSnap.exists()) return { status: 'unknown' };
-
+    let outcome = null;
+    const pSnap = await getDoc(partnerDocRef);
+    if (!pSnap.exists()) { outcome = { status: 'unknown' }; }
+    else {
       const pData = pSnap.data();
       const name = getDisplayName(pData);
-      if (!pData.checkedIn) return { status: 'notIntimed', name };
-
-      const studentId = pData.studentId || '';
-      const outQ = query(collection(db, 'sessions', outSession.id, 'registrations'),
-                         where('studentId', '==', studentId), limit(1));
-      const outSnap = await tx.get(outQ);
-
-      if (!outSnap.empty) {
-        const od = outSnap.docs[0].data();
-        if (od.checkedOut) {
+      if (!pData.checkedIn) { outcome = { status: 'notIntimed', name }; }
+      else {
+        const studentId = pData.studentId || '';
+        // Deterministic record ID = the student number (sanitized), so two gates
+        // or a re-scan can never create an extra record.
+        const docId = (String(studentId).replace(/[^A-Za-z0-9._-]/g, '-')) || ('nout_' + Date.now());
+        const outRef = doc(db, 'sessions', outSession.id, 'registrations', docId);
+        const outSnap = await getDoc(outRef);
+        if (outSnap.exists() && outSnap.data().checkedOut) {
+          const od = outSnap.data();
           const t = od.checkedOutAt ? od.checkedOutAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-          return { status: 'already', name, time: t || 'already' };
+          outcome = { status: 'already', name, time: t || 'already' };
+        } else {
+          // Copy the student's identity fields over, minus check-in metadata.
+          const identity = {};
+          for (const k of Object.keys(pData)) {
+            if (!OUT_META_KEYS.includes(k)) identity[k] = pData[k];
+          }
+          await setDoc(outRef, {
+            ...identity,
+            checkedIn: false, checkedInAt: null,
+            checkedOut: true, checkedOutAt: serverTimestamp(),
+            registeredAt: serverTimestamp()
+          });
+          outcome = { status: 'ok', name };
         }
-        tx.update(outSnap.docs[0].ref, { checkedOut: true, checkedOutAt: serverTimestamp() });
-        return { status: 'ok', name };
       }
-
-      // Copy the student's identity fields over, minus check-in metadata.
-      const identity = {};
-      for (const k of Object.keys(pData)) {
-        if (!OUT_META_KEYS.includes(k)) identity[k] = pData[k];
-      }
-      // Deterministic ID (student ID) so two gates can't create duplicates.
-      const docId = (String(studentId).replace(/[^A-Za-z0-9._-]/g, '-')) || ('nout_' + Date.now());
-      tx.set(doc(db, 'sessions', outSession.id, 'registrations', docId), {
-        ...identity,
-        checkedIn: false, checkedInAt: null,
-        checkedOut: true, checkedOutAt: serverTimestamp(),
-        registeredAt: serverTimestamp()
-      });
-      return { status: 'ok', name };
-    });
+    }
 
     if (!outcome || outcome.status === 'unknown') {
       flash(`Unknown code — not found in ${outSession.partnerName || 'the paired session'}.`, 'error');
