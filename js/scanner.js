@@ -58,6 +58,21 @@ function escapeHtml(str = '') {
   return String(str).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
 }
 
+// Turns a Firestore error into an honest message: the #1 field complaint is a
+// device still running the old cached app (points at the dead old project →
+// writes are denied), the #2 is weak signal in a packed hall.
+function scannerError(action, err) {
+  const code = (err && err.code) || '';
+  const msg = String((err && err.message) || '');
+  if (code === 'permission-denied') {
+    return `Can't ${action} — this device is running an outdated app copy. Fully close and reopen the page, then scan again.`;
+  }
+  if (code === 'unavailable' || code === 'deadline-exceeded' || /network|failed to fetch|offline/i.test(msg)) {
+    return `Can't ${action} — no internet connection right now. Reconnect and retry.`;
+  }
+  return `Connection problem — could not ${action}. (${code || 'error'})`;
+}
+
 // Registrations now have dynamic field keys (whatever the session's fields
 // were set to). "name" is the default id for the first field, but if an
 // admin renamed/removed it, fall back to the first non-metadata value.
@@ -183,7 +198,7 @@ async function checkIn(sessionId, registrationId) {
     refreshSessionChips([{ id: sessionId, name: sessionName }]);
   } catch (err) {
     console.error(err);
-    flash('Connection problem — could not record check-in.', 'error');
+    flash(scannerError('record check-in', err), 'error');
     sfx.play('error');
     buzz(120);
   }
@@ -322,7 +337,7 @@ async function recordTimeOut(outSession, partnerDocRef) {
     refreshSessionChips([{ id: outSession.id, name: outSession.name }]);
   } catch (err) {
     console.error(err);
-    flash('Connection problem — could not record time-out.', 'error');
+    flash(scannerError('record time-out', err), 'error');
     sfx.play('error');
     buzz(120);
   }
@@ -350,7 +365,7 @@ async function doTimeOutFromOutReg(outSession, outRegId) {
     await recordTimeOut(outSession, pReg.ref);
   } catch (err) {
     console.error(err);
-    flash('Connection problem — could not record time-out.', 'error');
+    flash(scannerError('record time-out', err), 'error');
   }
 }
 
@@ -660,7 +675,7 @@ function rebindScannerUI() {
       document.getElementById('manualStudentId').value = '';
     } catch (err) {
       console.error(err);
-      flash('Connection problem — could not look up that ID.', 'error');
+      flash(scannerError('look up that ID', err), 'error');
     }
   });
 }
