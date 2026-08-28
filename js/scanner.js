@@ -99,7 +99,7 @@ async function getSession(sessionId) {
         const pSnap = await getDoc(doc(db, 'sessions', d.linkTo));
         partnerName = pSnap.exists() ? (pSnap.data().name || '') : '';
       }
-      out = { id: sessionId, name: d.name || 'Unknown session', linkTo: d.linkTo || null, withTimeOut: !!d.withTimeOut, partnerName };
+      out = { id: sessionId, name: d.name || 'Unknown session', linkTo: d.linkTo || null, partnerName };
     }
   } catch (err) { console.warn(err); }
   sessionCache.set(sessionId, out);
@@ -126,18 +126,15 @@ async function refreshSessionChips(activeSessions) {
     try {
       const sess = await getSession(s.id);
       let label;
-      if (sess && sess.withTimeOut) {
+      if (sess && sess.linkTo) {
+        const q = query(collection(db, 'sessions', s.id, 'registrations'), where('checkedOut', '==', true));
+        label = (await getCountFromServer(q)).data().count + ' out';
+      } else {
         const qIn = query(collection(db, 'sessions', s.id, 'registrations'), where('checkedIn', '==', true));
         const qOut = query(collection(db, 'sessions', s.id, 'registrations'), where('checkedOut', '==', true));
         const cIn = (await getCountFromServer(qIn)).data().count;
         const cOut = (await getCountFromServer(qOut)).data().count;
         label = `${cIn} ✓ · ${cOut} out`;
-      } else if (sess && sess.linkTo) {
-        const q = query(collection(db, 'sessions', s.id, 'registrations'), where('checkedOut', '==', true));
-        label = (await getCountFromServer(q)).data().count + ' out';
-      } else {
-        const q = query(collection(db, 'sessions', s.id, 'registrations'), where('checkedIn', '==', true));
-        label = (await getCountFromServer(q)).data().count + ' ✓';
       }
       let chip = chips.querySelector(`[data-session="${s.id}"]`);
       if (!chip) {
@@ -249,7 +246,7 @@ async function routeScan(qrSessionId, registrationId) {
       await doTimeOutFromCon(g, registrationId);
       return;
     }
-    if (g && g.withTimeOut) {
+    if (g) {
       if (qrSessionId !== g.id) {
         flash(`${g.name} uses the same QR for time-in and time-out — scan its QR.`, 'error');
         sfx.play('error');
@@ -259,27 +256,20 @@ async function routeScan(qrSessionId, registrationId) {
       await checkInOrOut(g.id, registrationId);
       return;
     }
-    if (g) { await checkIn(g.id, registrationId); return; }
     flash('Unknown gate session.', 'error');
     return;
   }
 
-  // 2) Auto mode: a session that has BOTH time-in and time-out (withTimeOut) —
-  //    first scan = check-in, second scan = same QR = time-out.
+  // 2) Auto mode — one session, one QR, both states: first scan = time-in,
+  //    second scan (same QR) = time-out. Time-out is only possible AFTER a
+  //    time-in. Legacy paired gates (linkTo) are still honored below.
   const qrSess = await getSession(qrSessionId);
-  if (qrSess && qrSess.withTimeOut) {
-    await checkInOrOut(qrSessionId, registrationId);
-    return;
-  }
-
-  // 3) Auto mode: a QR minted by a paired (time-out) session routes to time-out.
   if (qrSess && qrSess.linkTo) {
     await doTimeOutFromOutReg(qrSess, registrationId);
     return;
   }
 
-  // 4) Normal time-in.
-  await checkIn(qrSessionId, registrationId);
+  await checkInOrOut(qrSessionId, registrationId);
 }
 
 // ---------- combined time-in / time-out (ONE session, ONE QR) ----------
@@ -693,10 +683,8 @@ function showPicker(candidates, sessionId) {
           const pReg = await partnerRegByStudentId(sSnap.linkTo, match.data().studentId || '');
           if (pReg) await recordTimeOut(sSnap, pReg.ref);
           else flash(`No time-in found for ${getDisplayName(match.data())} in ${sSnap.partnerName || 'the paired session'}.`, 'error');
-        } else if (sSnap && sSnap.withTimeOut) {
-          await checkInOrOut(sessionId, match.id);
         } else {
-          await checkIn(sessionId, match.id);
+          await checkInOrOut(sessionId, match.id);
         }
         document.getElementById('manualStudentId').value = '';
       }
@@ -740,8 +728,7 @@ function rebindScannerUI() {
         return;
       }
       if (found.picker) { showPicker(found.picker, sessionId); return; }
-      if (session && session.withTimeOut) await checkInOrOut(sessionId, found.doc.id);
-      else await checkIn(sessionId, found.doc.id);
+      await checkInOrOut(sessionId, found.doc.id);
       document.getElementById('manualStudentId').value = '';
     } catch (err) {
       console.error(err);

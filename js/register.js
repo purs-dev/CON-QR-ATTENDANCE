@@ -14,7 +14,7 @@ const qrState = document.getElementById('qrState');
 
 let sessionName = '';
 let sessionFields = [];
-let isCombined = false;
+let isCombined = true; // every session has BOTH time-in and time-out now
 
 function defaultFields() {
   return [
@@ -34,11 +34,8 @@ async function init() {
     const data = snap.data();
     sessionName = data.name;
     sessionFields = (data.fields && data.fields.length) ? data.fields : defaultFields();
-    isCombined = data.withTimeOut === true;
-    if (isCombined) {
-      const desc = document.getElementById('formDesc');
-      if (desc) desc.textContent = "Fill this out once — you'll get ONE QR that works for time-in AND time-out.";
-    }
+    const desc = document.getElementById('formDesc');
+    if (desc) desc.textContent = "Fill this out once — you'll get ONE QR that works for time-in AND time-out.";
 
     if (data.active === false || data.archived === true) {
       return showInvalid('Registration Closed', 'This session is no longer accepting new registrations. If you already registered, use the QR you were given earlier.');
