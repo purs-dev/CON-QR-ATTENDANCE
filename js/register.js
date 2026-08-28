@@ -1,6 +1,6 @@
 import { db } from "./firebase-config.js";
 import {
-  doc, getDoc, collection, addDoc, query, where, getDocs, limit, serverTimestamp
+  doc, getDoc, collection, addDoc, setDoc, query, where, getDocs, limit, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { sfx, confettiBurstAtElement as confettiAt, buzz, confirmDialog } from "./app-shell.js";
 
@@ -93,12 +93,33 @@ document.getElementById('regForm').addEventListener('submit', async (e) => {
     const regCollection = collection(db, 'sessions', sessionId, 'registrations');
     let registrationId = null;
 
-    // Idempotent: if a "studentId" field exists and this ID already registered,
-    // reuse the existing record instead of creating a duplicate.
-    if (values.studentId) {
-      const dupQuery = query(regCollection, where('studentId', '==', values.studentId), limit(1));
-      const dupSnap = await getDocs(dupQuery);
-      if (!dupSnap.empty) registrationId = dupSnap.docs[0].id;
+    // PRIMARY KEY = the student number. The registration document's ID IS the
+    // student's number (sanitized for Firestore). A student can therefore never
+    // be registered twice in the same session, and time-out can look the
+    // record up by number directly.
+    const primaryId = values.studentId ? String(values.studentId).trim().replace(/[^A-Za-z0-9._-]/g, '-') : '';
+    if (primaryId) {
+      const primaryRef = doc(regCollection, primaryId);
+      const byKey = await getDoc(primaryRef);
+      if (byKey.exists()) {
+        registrationId = primaryId; // already registered under this number
+      } else {
+        // Legacy records (older sessions) use auto IDs — catch those too.
+        const legacy = await getDocs(query(regCollection, where('studentId', '==', values.studentId.trim()), limit(1)));
+        if (!legacy.empty) {
+          registrationId = legacy.docs[0].id;
+        } else {
+          await setDoc(primaryRef, {
+            ...values,
+            registeredAt: serverTimestamp(),
+            checkedIn: false,
+            checkedInAt: null,
+            checkedOut: false,
+            checkedOutAt: null
+          });
+          registrationId = primaryId;
+        }
+      }
     }
 
     if (!registrationId) {
